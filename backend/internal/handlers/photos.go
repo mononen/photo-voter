@@ -188,7 +188,7 @@ func (h *PhotosHandler) Batch(c fiber.Ctx) error {
 			SELECT burst_id
 			FROM burst_stats
 			WHERE user_voted < total_in_burst
-			ORDER BY all_votes_in_burst ASC, burst_id ASC
+			ORDER BY all_votes_in_burst ASC, RANDOM()
 			LIMIT 1
 		)
 		SELECT b.id, COALESCE(b.filename, '')
