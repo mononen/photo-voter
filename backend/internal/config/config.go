@@ -7,8 +7,8 @@ type Config struct {
 	JWTSecret          string
 	GoogleClientID     string
 	GoogleClientSecret string
-	GoogleAlbumID      string
 	GoogleRedirectURL  string
+	FrontendURL        string
 	Port               string
 }
 
@@ -18,8 +18,8 @@ func Load() Config {
 		JWTSecret:          getEnv("JWT_SECRET", "dev-secret-change-in-production"),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		GoogleAlbumID:      os.Getenv("GOOGLE_ALBUM_ID"),
 		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", "http://localhost:3000/api/admin/auth/google/callback"),
+		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:5173"),
 		Port:               getEnv("PORT", "3000"),
 	}
 }

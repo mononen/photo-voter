@@ -15,25 +15,30 @@ import (
 )
 
 const (
-	photosAPIBase = "https://photoslibrary.googleapis.com/v1"
-	urlTTL        = 55 * time.Minute
+	pickerAPIBase = "https://photospicker.googleapis.com/v1"
+	// Picker base URLs expire after ~1 h; store 23 h as a generous upper bound.
+	// Re-run the picker if voting sessions outlast this.
+	pickerURLTTL = 23 * time.Hour
 )
 
 type GooglePhotosService struct {
-	config  *oauth2.Config
-	albumID string
-	db      *pgxpool.Pool
+	config *oauth2.Config
+	db     *pgxpool.Pool
 }
 
-func NewGooglePhotosService(clientID, clientSecret, redirectURL, albumID string, db *pgxpool.Pool) *GooglePhotosService {
+func NewGooglePhotosService(clientID, clientSecret, redirectURL string, db *pgxpool.Pool) *GooglePhotosService {
 	cfg := &oauth2.Config{
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
 		RedirectURL:  redirectURL,
-		Scopes:       []string{"https://www.googleapis.com/auth/photoslibrary.readonly"},
-		Endpoint:     google.Endpoint,
+		Scopes: []string{
+			"openid",
+			"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/photospicker.mediaitems.readonly",
+		},
+		Endpoint: google.Endpoint,
 	}
-	return &GooglePhotosService{config: cfg, albumID: albumID, db: db}
+	return &GooglePhotosService{config: cfg, db: db}
 }
 
 func (s *GooglePhotosService) AuthURL() string {
@@ -54,6 +59,37 @@ func (s *GooglePhotosService) ExchangeCode(ctx context.Context, code string) err
 	return err
 }
 
+func (s *GooglePhotosService) IsOAuthConnected(ctx context.Context) bool {
+	var connected bool
+	_ = s.db.QueryRow(ctx,
+		"SELECT EXISTS(SELECT 1 FROM google_tokens WHERE id = 1 AND refresh_token IS NOT NULL)",
+	).Scan(&connected)
+	return connected
+}
+
+func (s *GooglePhotosService) GetAuthorizedEmail(ctx context.Context) (string, error) {
+	client, err := s.getClient(ctx)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var info struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return "", err
+	}
+	return info.Email, nil
+}
+
+func (s *GooglePhotosService) GetHTTPClient(ctx context.Context) (*http.Client, error) {
+	return s.getClient(ctx)
+}
+
 func (s *GooglePhotosService) getClient(ctx context.Context) (*http.Client, error) {
 	var accessToken, refreshToken string
 	var expiry time.Time
@@ -63,7 +99,6 @@ func (s *GooglePhotosService) getClient(ctx context.Context) (*http.Client, erro
 	if err != nil {
 		return nil, fmt.Errorf("no google token stored — run the OAuth flow first: %w", err)
 	}
-
 	stored := &oauth2.Token{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
@@ -83,19 +118,73 @@ func (s *GooglePhotosService) getClient(ctx context.Context) (*http.Client, erro
 	return oauth2.NewClient(ctx, oauth2.StaticTokenSource(fresh)), nil
 }
 
-type mediaItem struct {
-	ID       string `json:"id"`
-	BaseURL  string `json:"baseUrl"`
-	Filename string `json:"filename"`
-	MimeType string `json:"mimeType"`
+// --- Picker API ---
+
+type PickerSession struct {
+	ID            string `json:"id"`
+	PickerURI     string `json:"pickerUri"`
+	MediaItemsSet bool   `json:"mediaItemsSet"`
+	ExpireTime    string `json:"expireTime"`
 }
 
-type searchResponse struct {
-	MediaItems    []mediaItem `json:"mediaItems"`
-	NextPageToken string      `json:"nextPageToken"`
+type pickerMediaItem struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"`
+	MediaFile struct {
+		BaseURL  string `json:"baseUrl"`
+		MimeType string `json:"mimeType"`
+		Filename string `json:"filename"`
+	} `json:"mediaFile"`
 }
 
-func (s *GooglePhotosService) SyncAlbum(ctx context.Context) (int, error) {
+type pickerMediaItemsResponse struct {
+	MediaItems    []pickerMediaItem `json:"mediaItems"`
+	NextPageToken string            `json:"nextPageToken"`
+}
+
+func (s *GooglePhotosService) CreatePickerSession(ctx context.Context) (*PickerSession, error) {
+	client, err := s.getClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Post(pickerAPIBase+"/sessions", "application/json", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return nil, fmt.Errorf("create picker session: %w", err)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("picker API %d: %s", resp.StatusCode, string(data))
+	}
+	var session PickerSession
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+func (s *GooglePhotosService) GetPickerSession(ctx context.Context, sessionID string) (*PickerSession, error) {
+	client, err := s.getClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Get(pickerAPIBase + "/sessions/" + sessionID)
+	if err != nil {
+		return nil, err
+	}
+	data, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("picker API %d: %s", resp.StatusCode, string(data))
+	}
+	var session PickerSession
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+func (s *GooglePhotosService) ImportPickerSession(ctx context.Context, sessionID string) (int, error) {
 	client, err := s.getClient(ctx)
 	if err != nil {
 		return 0, err
@@ -103,35 +192,32 @@ func (s *GooglePhotosService) SyncAlbum(ctx context.Context) (int, error) {
 
 	total := 0
 	pageToken := ""
-	expiresAt := time.Now().Add(urlTTL)
+	expiresAt := time.Now().Add(pickerURLTTL)
 
 	for {
-		body := map[string]any{"albumId": s.albumID, "pageSize": 100}
+		u := fmt.Sprintf("%s/mediaItems?sessionId=%s&pageSize=100", pickerAPIBase, sessionID)
 		if pageToken != "" {
-			body["pageToken"] = pageToken
+			u += "&pageToken=" + pageToken
 		}
-		jsonBody, _ := json.Marshal(body)
-
-		resp, err := client.Post(photosAPIBase+"/mediaItems:search", "application/json", bytes.NewReader(jsonBody))
-		if err != nil {
-			return total, fmt.Errorf("search media items: %w", err)
-		}
-		data, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp, err := client.Get(u)
 		if err != nil {
 			return total, err
 		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return total, fmt.Errorf("google photos API %d: %s", resp.StatusCode, string(data))
+			return total, fmt.Errorf("picker API %d: %s", resp.StatusCode, string(data))
 		}
-
-		var result searchResponse
+		var result pickerMediaItemsResponse
 		if err := json.Unmarshal(data, &result); err != nil {
-			return total, fmt.Errorf("decode response: %w", err)
+			return total, err
 		}
 
 		for _, item := range result.MediaItems {
-			switch item.MimeType {
+			if item.Type != "PHOTO" {
+				continue
+			}
+			switch item.MediaFile.MimeType {
 			case "image/jpeg", "image/png", "image/heic", "image/heif", "image/webp":
 			default:
 				continue
@@ -141,7 +227,7 @@ func (s *GooglePhotosService) SyncAlbum(ctx context.Context) (int, error) {
 				VALUES ($1, $2, $3, $4)
 				ON CONFLICT (google_photos_id) DO UPDATE
 				SET base_url = $2, url_expires_at = $3, filename = $4
-			`, item.ID, item.BaseURL, expiresAt, item.Filename); err != nil {
+			`, item.ID, item.MediaFile.BaseURL, expiresAt, item.MediaFile.Filename); err != nil {
 				return total, fmt.Errorf("upsert photo %s: %w", item.ID, err)
 			}
 			total++
@@ -152,32 +238,10 @@ func (s *GooglePhotosService) SyncAlbum(ctx context.Context) (int, error) {
 		}
 		pageToken = result.NextPageToken
 	}
+
+	// Clean up session after import (best-effort)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodDelete, pickerAPIBase+"/sessions/"+sessionID, nil)
+	client.Do(req)
+
 	return total, nil
-}
-
-func (s *GooglePhotosService) RefreshPhotoURL(ctx context.Context, photoID string) (string, time.Time, error) {
-	client, err := s.getClient(ctx)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-
-	var googlePhotosID string
-	if err := s.db.QueryRow(ctx,
-		"SELECT google_photos_id FROM photos WHERE id = $1", photoID,
-	).Scan(&googlePhotosID); err != nil {
-		return "", time.Time{}, err
-	}
-
-	resp, err := client.Get(fmt.Sprintf("%s/mediaItems/%s", photosAPIBase, googlePhotosID))
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer resp.Body.Close()
-
-	var item mediaItem
-	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
-		return "", time.Time{}, err
-	}
-
-	return item.BaseURL, time.Now().Add(urlTTL), nil
 }

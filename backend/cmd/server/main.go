@@ -34,14 +34,13 @@ func main() {
 		cfg.GoogleClientID,
 		cfg.GoogleClientSecret,
 		cfg.GoogleRedirectURL,
-		cfg.GoogleAlbumID,
 		db,
 	)
 
 	authHandler := handlers.NewAuthHandler(db, cfg.JWTSecret)
 	photosHandler := handlers.NewPhotosHandler(db, gp)
 	votesHandler := handlers.NewVotesHandler(db)
-	adminHandler := handlers.NewAdminHandler(db, gp)
+	adminHandler := handlers.NewAdminHandler(db, gp, cfg.FrontendURL)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c fiber.Ctx, err error) error {
@@ -64,16 +63,21 @@ func main() {
 
 	photos := api.Group("/photos")
 	photos.Get("/next", middleware.JWT(cfg.JWTSecret), photosHandler.Next)
-	photos.Get("/rankings", photosHandler.Rankings)
+	photos.Get("/rankings", middleware.JWT(cfg.JWTSecret), middleware.AdminOnly(), photosHandler.Rankings)
+	photos.Get("/:id/image", photosHandler.ProxyImage) // public — UUID is unguessable
 
 	api.Post("/votes", middleware.JWT(cfg.JWTSecret), votesHandler.Submit)
 
-	// Google OAuth callback is unprotected — it's a redirect from Google
+	// Google OAuth callback — unprotected, redirect from Google
 	api.Get("/admin/auth/google/callback", adminHandler.GoogleAuthCallback)
 
 	admin := api.Group("/admin", middleware.JWT(cfg.JWTSecret), middleware.AdminOnly())
-	admin.Get("/auth/google", adminHandler.GoogleAuthStart)
-	admin.Post("/sync", adminHandler.Sync)
+	admin.Get("/settings", adminHandler.GetSettings)
+	admin.Delete("/photos", adminHandler.ClearPhotos)
+	admin.Get("/auth/google/url", adminHandler.GoogleAuthURL)
+	admin.Post("/picker/session", adminHandler.StartPickerSession)
+	admin.Get("/picker/session/:id", adminHandler.CheckPickerSession)
+	admin.Post("/picker/session/:id/import", adminHandler.ImportPickerSession)
 
 	log.Printf("Server listening on :%s", cfg.Port)
 	log.Fatal(app.Listen(":" + cfg.Port))

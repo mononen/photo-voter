@@ -6,10 +6,10 @@ import PhotoCard from '../components/PhotoCard'
 import VoteButtons from '../components/VoteButtons'
 import { useAuth } from '../hooks/useAuth'
 
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+
 interface Photo {
   id: string
-  url: string
-  thumb: string
 }
 
 async function fetchNextPhoto(): Promise<Photo | null> {
@@ -20,7 +20,7 @@ async function fetchNextPhoto(): Promise<Photo | null> {
 
 export default function Vote() {
   const queryClient = useQueryClient()
-  const { logout } = useAuth()
+  const { logout, isAdmin } = useAuth()
   const [voting, setVoting] = useState(false)
 
   const { data: photo, isLoading } = useQuery<Photo | null>({
@@ -42,13 +42,19 @@ export default function Vote() {
   return (
     <div className="flex flex-col min-h-screen bg-black text-white">
       <header className="flex justify-between items-center px-6 py-4">
-        <Link to="/rankings" className="text-sm text-gray-400 hover:text-white transition-colors">
-          Rankings →
-        </Link>
-        <button
-          onClick={logout}
-          className="text-sm text-gray-400 hover:text-white transition-colors"
-        >
+        <div className="flex gap-4">
+          {isAdmin && (
+            <Link to="/rankings" className="text-sm text-gray-400 hover:text-white transition-colors">
+              Rankings
+            </Link>
+          )}
+          {isAdmin && (
+            <Link to="/admin" className="text-sm text-gray-400 hover:text-white transition-colors">
+              Admin
+            </Link>
+          )}
+        </div>
+        <button onClick={logout} className="text-sm text-gray-400 hover:text-white transition-colors">
           Log out
         </button>
       </header>
@@ -60,13 +66,15 @@ export default function Vote() {
           <div className="text-center space-y-4">
             <p className="text-2xl font-bold">All done!</p>
             <p className="text-gray-400">You've voted on every photo.</p>
-            <Link to="/rankings" className="text-blue-400 hover:underline">
-              See the rankings →
-            </Link>
+            {isAdmin && (
+              <Link to="/rankings" className="text-blue-400 hover:underline">
+                See the rankings →
+              </Link>
+            )}
           </div>
         ) : (
           <>
-            <PhotoCard url={photo.url} />
+            <PhotoCard url={`${API_BASE}/api/photos/${photo.id}/image`} />
             <VoteButtons onVote={(v) => vote.mutate(v)} disabled={voting} />
           </>
         )}

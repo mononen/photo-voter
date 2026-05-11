@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"time"
+	"io"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
@@ -10,26 +10,30 @@ import (
 )
 
 type PhotosHandler struct {
-	db           *pgxpool.Pool
-	googlePhotos *services.GooglePhotosService
+	db *pgxpool.Pool
+	gp *services.GooglePhotosService
 }
 
 func NewPhotosHandler(db *pgxpool.Pool, gp *services.GooglePhotosService) *PhotosHandler {
-	return &PhotosHandler{db: db, googlePhotos: gp}
+	return &PhotosHandler{db: db, gp: gp}
 }
 
 func (h *PhotosHandler) Next(c fiber.Ctx) error {
 	userID := c.Locals("userID").(string)
 
-	var id, baseURL string
-	var urlExpiresAt time.Time
+	var id string
 	err := h.db.QueryRow(c.Context(), `
-		SELECT p.id, p.base_url, p.url_expires_at
+		SELECT p.id
 		FROM photos p
+		LEFT JOIN (
+			SELECT photo_id, COUNT(*) AS total_votes
+			FROM votes
+			GROUP BY photo_id
+		) vc ON vc.photo_id = p.id
 		WHERE p.id NOT IN (SELECT photo_id FROM votes WHERE user_id = $1)
-		ORDER BY RANDOM()
+		ORDER BY COALESCE(vc.total_votes, 0) ASC, RANDOM()
 		LIMIT 1
-	`, userID).Scan(&id, &baseURL, &urlExpiresAt)
+	`, userID).Scan(&id)
 
 	if err == pgx.ErrNoRows {
 		return c.SendStatus(fiber.StatusNoContent)
@@ -38,26 +42,49 @@ func (h *PhotosHandler) Next(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
 	}
 
-	if time.Until(urlExpiresAt) < 30*time.Minute {
-		if newURL, newExpiry, err := h.googlePhotos.RefreshPhotoURL(c.Context(), id); err == nil {
-			baseURL = newURL
-			_, _ = h.db.Exec(c.Context(),
-				"UPDATE photos SET base_url = $1, url_expires_at = $2 WHERE id = $3",
-				newURL, newExpiry, id,
-			)
-		}
+	return c.JSON(fiber.Map{"id": id})
+}
+
+// ProxyImage fetches the photo from Google using the stored OAuth token and
+// streams it to the client. This is necessary because Picker API base URLs
+// require an Authorization header and cannot be loaded directly in <img> tags.
+func (h *PhotosHandler) ProxyImage(c fiber.Ctx) error {
+	photoID := c.Params("id")
+	size := c.Query("size", "full")
+
+	var baseURL string
+	if err := h.db.QueryRow(c.Context(),
+		"SELECT base_url FROM photos WHERE id = $1", photoID,
+	).Scan(&baseURL); err != nil {
+		return c.SendStatus(fiber.StatusNotFound)
 	}
 
-	return c.JSON(fiber.Map{
-		"id":    id,
-		"url":   baseURL + "=w1920-h1080",
-		"thumb": baseURL + "=w400-h400-c",
-	})
+	sizeParam := "=w1920-h1080"
+	if size == "thumb" {
+		sizeParam = "=w400-h400-c"
+	}
+
+	client, err := h.gp.GetHTTPClient(c.Context())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	resp, err := client.Get(baseURL + sizeParam)
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+	}
+	defer resp.Body.Close()
+
+	c.Set("Content-Type", resp.Header.Get("Content-Type"))
+	c.Set("Cache-Control", "private, max-age=3600")
+	c.Status(resp.StatusCode)
+	_, err = io.Copy(c.Response().BodyWriter(), resp.Body)
+	return err
 }
 
 func (h *PhotosHandler) Rankings(c fiber.Ctx) error {
 	rows, err := h.db.Query(c.Context(), `
-		SELECT p.id, p.base_url, COALESCE(p.filename, '') AS filename,
+		SELECT p.id, COALESCE(p.filename, '') AS filename,
 		       COALESCE(SUM(v.vote), 0)::int AS score,
 		       COUNT(v.id)::int AS vote_count
 		FROM photos p
@@ -72,7 +99,6 @@ func (h *PhotosHandler) Rankings(c fiber.Ctx) error {
 
 	type rankingEntry struct {
 		ID        string `json:"id"`
-		URL       string `json:"url"`
 		Filename  string `json:"filename"`
 		Score     int    `json:"score"`
 		VoteCount int    `json:"vote_count"`
@@ -81,11 +107,9 @@ func (h *PhotosHandler) Rankings(c fiber.Ctx) error {
 	results := make([]rankingEntry, 0)
 	for rows.Next() {
 		var r rankingEntry
-		var baseURL string
-		if err := rows.Scan(&r.ID, &baseURL, &r.Filename, &r.Score, &r.VoteCount); err != nil {
+		if err := rows.Scan(&r.ID, &r.Filename, &r.Score, &r.VoteCount); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
 		}
-		r.URL = baseURL + "=w400-h400-c"
 		results = append(results, r)
 	}
 	return c.JSON(results)

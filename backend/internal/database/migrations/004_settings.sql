@@ -1,0 +1,7 @@
+CREATE TABLE settings (
+    id INT PRIMARY KEY DEFAULT 1,
+    album_id TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO settings (id) VALUES (1) ON CONFLICT DO NOTHING;
