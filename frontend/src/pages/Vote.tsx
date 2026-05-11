@@ -170,6 +170,32 @@ export default function Vote() {
     }, 300)
   }
 
+  const navigatePrev = useCallback(() => {
+    if (exitVote !== null || batch.length === 0) return
+    setBatchIndex(i => Math.max(0, i - 1))
+  }, [exitVote, batch.length])
+
+  const navigateNext = useCallback(() => {
+    if (exitVote !== null || batch.length === 0) return
+    setBatchIndex(i => Math.min(batch.length - 1, i + 1))
+  }, [exitVote, batch.length])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest('input, textarea, [contenteditable]')) return
+      if (lightboxOpen) return
+      if (allDone || isLoading) return
+      if (e.key === 'a') handleVote(-1)
+      else if (e.key === 's') handleVote(0)
+      else if (e.key === 'd') handleVote(1)
+      else if (e.key === 'f' || e.key === 'ArrowLeft') { e.preventDefault(); navigatePrev() }
+      else if (e.key === 'g' || e.key === 'ArrowRight') { e.preventDefault(); navigateNext() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exitVote, batch, batchIndex, batchVotes, lightboxOpen, allDone, isLoading, loadNextBatch, navigatePrev, navigateNext])
+
   const isZoomed = lbTransform.scale > 1
 
   return (
