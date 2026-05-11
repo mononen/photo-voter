@@ -15,7 +15,7 @@ export default function VoteButtons({ onVote, disabled }: Props) {
   const [showInfo, setShowInfo] = useState(false)
 
   return (
-    <div className="flex flex-col items-center gap-2">
+    <div className="flex items-center gap-3">
       <div className="flex gap-8 items-center">
         <button
           onClick={() => onVote(-1)}
@@ -41,6 +41,9 @@ export default function VoteButtons({ onVote, disabled }: Props) {
         >
           ✓
         </button>
+      </div>
+
+      <div className="relative">
         <button
           onClick={() => setShowInfo(v => !v)}
           className="w-7 h-7 rounded-full border border-gray-400 text-gray-400 hover:text-gray-200 hover:border-gray-200 text-sm font-bold transition-colors flex items-center justify-center leading-none"
@@ -48,22 +51,22 @@ export default function VoteButtons({ onVote, disabled }: Props) {
         >
           i
         </button>
-      </div>
 
-      {showInfo && (
-        <div className="mt-1 bg-gray-800 border border-gray-600 rounded-xl px-4 py-3 text-sm text-left w-72 shadow-xl">
-          {CRITERIA.map(({ icon, color, label, sub, desc }) => (
-            <div key={label} className="flex items-start gap-3 py-1.5 first:pt-0 last:pb-0 border-b border-gray-700 last:border-0">
-              <span className={`${color} font-bold text-base w-4 text-center shrink-0 mt-0.5`}>{icon}</span>
-              <span className="text-gray-200">
-                <span className="font-semibold">{label}</span>
-                <span className="text-gray-400"> — {sub}: </span>
-                {desc}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+        {showInfo && (
+          <div className="absolute left-9 top-1/2 -translate-y-1/2 bg-gray-800 border border-gray-600 rounded-xl px-4 py-3 text-sm text-left w-72 shadow-xl z-10">
+            {CRITERIA.map(({ icon, color, label, sub, desc }) => (
+              <div key={label} className="flex items-start gap-3 py-1.5 first:pt-0 last:pb-0 border-b border-gray-700 last:border-0">
+                <span className={`${color} font-bold text-base w-4 text-center shrink-0 mt-0.5`}>{icon}</span>
+                <span className="text-gray-200">
+                  <span className="font-semibold">{label}</span>
+                  <span className="text-gray-400"> — {sub}: </span>
+                  {desc}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
