@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 type Config struct {
 	DatabaseURL        string
@@ -14,7 +17,7 @@ type Config struct {
 
 func Load() Config {
 	return Config{
-		DatabaseURL:        getEnv("DATABASE_URL", "postgres://photovoter:photovoter@localhost:5432/photovoter"),
+		DatabaseURL:        buildDatabaseURL(),
 		JWTSecret:          getEnv("JWT_SECRET", "dev-secret-change-in-production"),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
@@ -22,6 +25,30 @@ func Load() Config {
 		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:5173"),
 		Port:               getEnv("PORT", "3000"),
 	}
+}
+
+func buildDatabaseURL() string {
+	if raw := os.Getenv("DATABASE_URL"); raw != "" {
+		return raw
+	}
+	user := getEnv("POSTGRES_USER", "photovoter")
+	password := os.Getenv("POSTGRES_PASSWORD")
+	host := getEnv("POSTGRES_HOST", "postgres")
+	db := getEnv("POSTGRES_DB", user)
+	// DSN format passes credentials as raw strings — no URL encoding, no special-char issues.
+	return "host=" + dsnQuote(host) +
+		" port=5432" +
+		" user=" + dsnQuote(user) +
+		" password=" + dsnQuote(password) +
+		" dbname=" + dsnQuote(db)
+}
+
+// dsnQuote wraps a value in single quotes and escapes backslashes and single
+// quotes per libpq DSN rules, so any password character is safe.
+func dsnQuote(v string) string {
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	v = strings.ReplaceAll(v, `'`, `\'`)
+	return "'" + v + "'"
 }
 
 func getEnv(key, fallback string) string {

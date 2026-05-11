@@ -6,7 +6,7 @@ name: photo-voter
 # Before starting:
 #   - Fill in the two image: fields below
 #   - Create a .env file from .env.example and set real values
-#   - Set POSTGRES_PASSWORD in .env (must match DATABASE_URL)
+#   - Set PROXY_NETWORK below to the name of your existing reverse proxy network
 #
 # Frontend image must be built with:
 #   docker build --target production \
@@ -21,17 +21,20 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    env_file: .env
     environment:
-      POSTGRES_DB: photovoter
-      POSTGRES_USER: photovoter
+      POSTGRES_DB: ${POSTGRES_DB:-photovoter}
+      POSTGRES_USER: ${POSTGRES_USER:-photovoter}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U photovoter"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-photovoter}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - internal
 
   backend:
     image: # TODO your-registry/photo-voter-backend:latest
@@ -40,17 +43,24 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - internal
 
   frontend:
     image: # TODO your-registry/photo-voter-frontend:latest
     restart: unless-stopped
-    # Bind to loopback — let your reverse proxy handle external traffic and TLS.
-    # Point your reverse proxy at 127.0.0.1:<host_port>.
-    # /api/ requests are proxied internally to the backend container by nginx.
-    ports:
-      - "127.0.0.1:5173:80"
     depends_on:
       - backend
+    networks:
+      - internal  # talks to backend via nginx proxy block
+      - proxy     # reachable by your reverse proxy
 
 volumes:
   postgres_data:
+
+networks:
+  internal:
+    driver: bridge
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:?set PROXY_NETWORK in .env to your reverse proxy network name}

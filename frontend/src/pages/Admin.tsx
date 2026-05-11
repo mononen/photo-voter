@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import api from '../api/client'
@@ -42,10 +42,12 @@ export default function Admin() {
     enabled: !!session && !session.media_items_set,
     refetchInterval: 4000,
     refetchIntervalInBackground: true,
-    onSuccess: (data: PickerSession) => {
-      if (data.media_items_set) setSession(data)
-    },
   })
+
+  // onSuccess was removed in React Query v5 — watch via useEffect instead
+  useEffect(() => {
+    if (sessionStatus?.media_items_set) setSession(sessionStatus)
+  }, [sessionStatus])
 
   const ready = sessionStatus?.media_items_set ?? session?.media_items_set ?? false
 

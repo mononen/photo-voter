@@ -62,7 +62,7 @@ export default function Vote() {
       <main className="flex-1 flex flex-col items-center justify-center gap-8 p-6">
         {isLoading ? (
           <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
-        ) : photo === null ? (
+        ) : !photo ? (
           <div className="text-center space-y-4">
             <p className="text-2xl font-bold">All done!</p>
             <p className="text-gray-400">You've voted on every photo.</p>
