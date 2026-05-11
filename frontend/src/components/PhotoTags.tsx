@@ -121,7 +121,7 @@ export default function PhotoTags({ photoId, disabled }: Props) {
             className="w-full bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-white/40 transition-colors"
           />
           {showSuggestions && filteredSuggestions.length > 0 && (
-            <ul className="absolute z-20 top-full mt-1 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden">
+            <ul className="absolute z-20 bottom-full mb-1 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden">
               {filteredSuggestions.map((name) => (
                 <li key={name}>
                   <button

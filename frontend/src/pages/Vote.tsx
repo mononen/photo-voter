@@ -222,7 +222,7 @@ export default function Vote() {
                 disabled={exitVote !== null}
               />
             )}
-            <div className="flex-1 min-h-0 w-full flex items-center justify-center">
+            <div className="flex-1 min-h-0 w-full overflow-hidden flex items-center justify-center">
               <PhotoCard
                 key={renderedId ?? undefined}
                 url={renderedUrl}
