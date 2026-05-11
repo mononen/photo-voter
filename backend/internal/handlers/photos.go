@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"fmt"
 	"io"
+	"strconv"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
@@ -59,9 +61,16 @@ func (h *PhotosHandler) ProxyImage(c fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNotFound)
 	}
 
-	sizeParam := "=w1920-h1080"
-	if size == "thumb" {
+	var sizeParam string
+	switch {
+	case size == "thumb":
 		sizeParam = "=w400-h400-c"
+	case c.Query("w") != "":
+		w := clampDim(c.Query("w"), 4096)
+		h := clampDim(c.Query("h"), 4096)
+		sizeParam = fmt.Sprintf("=w%d-h%d", w, h)
+	default:
+		sizeParam = "=w1920-h1080"
 	}
 
 	client, err := h.gp.GetHTTPClient(c.Context())
@@ -113,4 +122,15 @@ func (h *PhotosHandler) Rankings(c fiber.Ctx) error {
 		results = append(results, r)
 	}
 	return c.JSON(results)
+}
+
+func clampDim(s string, max int) int {
+	v, err := strconv.Atoi(s)
+	if err != nil || v <= 0 {
+		return 1080
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
