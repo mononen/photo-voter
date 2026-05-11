@@ -58,14 +58,20 @@ func (h *PhotosHandler) ProxyImage(c fiber.Ctx) error {
 	var baseURL string
 	var urlExpiresAt time.Time
 	var googlePhotosID string
+	var pickerSessionID *string
 	if err := h.db.QueryRow(c.Context(),
-		"SELECT base_url, url_expires_at, google_photos_id FROM photos WHERE id = $1", photoID,
-	).Scan(&baseURL, &urlExpiresAt, &googlePhotosID); err != nil {
+		"SELECT base_url, url_expires_at, google_photos_id, picker_session_id FROM photos WHERE id = $1", photoID,
+	).Scan(&baseURL, &urlExpiresAt, &googlePhotosID, &pickerSessionID); err != nil {
 		return c.SendStatus(fiber.StatusNotFound)
 	}
 
+	sessionID := ""
+	if pickerSessionID != nil {
+		sessionID = *pickerSessionID
+	}
+
 	if time.Now().After(urlExpiresAt) {
-		fresh, err := h.gp.RefreshBaseURL(c.Context(), googlePhotosID)
+		fresh, err := h.gp.RefreshSessionURLs(c.Context(), sessionID, googlePhotosID)
 		if err != nil {
 			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "photo URL expired and could not be refreshed: " + err.Error()})
 		}
@@ -92,6 +98,20 @@ func (h *PhotosHandler) ProxyImage(c fiber.Ctx) error {
 	resp, err := client.Get(baseURL + sizeParam)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// If Google rejects the URL (expired base URL), refresh and retry once.
+	if resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 410 {
+		resp.Body.Close()
+		fresh, refreshErr := h.gp.RefreshSessionURLs(c.Context(), sessionID, googlePhotosID)
+		if refreshErr != nil {
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "photo URL expired and could not be refreshed: " + refreshErr.Error()})
+		}
+		baseURL = fresh
+		resp, err = client.Get(baseURL + sizeParam)
+		if err != nil {
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
+		}
 	}
 	defer resp.Body.Close()
 

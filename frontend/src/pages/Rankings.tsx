@@ -18,11 +18,19 @@ function imageUrl(id: string, thumb = false) {
 
 export default function Rankings() {
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
+  const [showZeroVotes, setShowZeroVotes] = useState(true)
 
   const { data: photos, isLoading } = useQuery<RankedPhoto[]>({
     queryKey: ['rankings'],
     queryFn: () => api.get('/photos/rankings').then((r) => r.data),
   })
+
+  const visiblePhotos = photos
+    ? (showZeroVotes ? photos : photos.filter((p) => p.vote_count > 0)).map((p) => ({
+        ...p,
+        rank: photos.indexOf(p) + 1,
+      }))
+    : []
 
   const closeLightbox = useCallback(() => setLightboxIdx(null), [])
 
@@ -30,7 +38,7 @@ export default function Rankings() {
     setLightboxIdx((i) => (i !== null && i > 0 ? i - 1 : i)), [])
 
   const next = useCallback(() =>
-    setLightboxIdx((i) => (i !== null && photos && i < photos.length - 1 ? i + 1 : i)), [photos])
+    setLightboxIdx((i) => (i !== null && i < visiblePhotos.length - 1 ? i + 1 : i)), [visiblePhotos.length])
 
   useEffect(() => {
     if (lightboxIdx === null) return
@@ -43,14 +51,26 @@ export default function Rankings() {
     return () => window.removeEventListener('keydown', onKey)
   }, [lightboxIdx, closeLightbox, prev, next])
 
-  const active = lightboxIdx !== null && photos ? photos[lightboxIdx] : null
+  const active = lightboxIdx !== null ? visiblePhotos[lightboxIdx] : null
+
+  const zeroVoteCount = photos ? photos.filter((p) => p.vote_count === 0).length : 0
 
   return (
     <>
       <div className="max-w-5xl mx-auto px-6 py-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">Rankings</h1>
-          <Link to="/" className="text-blue-500 hover:underline text-sm">← Back to voting</Link>
+          <div className="flex items-center gap-4">
+            {zeroVoteCount > 0 && (
+              <button
+                onClick={() => { setLightboxIdx(null); setShowZeroVotes((v) => !v) }}
+                className="text-sm text-gray-500 hover:text-gray-800 transition-colors"
+              >
+                {showZeroVotes ? `Hide unvoted (${zeroVoteCount})` : `Show unvoted (${zeroVoteCount})`}
+              </button>
+            )}
+            <Link to="/" className="text-blue-500 hover:underline text-sm">← Back to voting</Link>
+          </div>
         </div>
 
         {isLoading ? (
@@ -61,7 +81,7 @@ export default function Rankings() {
           <p className="text-gray-500 text-center py-20">No photos yet.</p>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {photos.map((photo, i) => (
+            {visiblePhotos.map((photo, i) => (
               <button
                 key={photo.id}
                 onClick={() => setLightboxIdx(i)}
@@ -74,7 +94,7 @@ export default function Rankings() {
                   loading="lazy"
                 />
                 <div className="absolute top-2 left-2 bg-black/60 text-white text-xs font-bold px-2 py-1 rounded-full">
-                  #{i + 1}
+                  #{photo.rank}
                 </div>
                 <div className="p-2 space-y-1">
                   <p className="text-xs text-gray-500 truncate" title={photo.filename}>
@@ -110,7 +130,7 @@ export default function Rankings() {
           >
             <div className="flex items-center gap-3">
               <span className="text-sm font-bold text-gray-300">
-                #{lightboxIdx! + 1} / {photos.length}
+                #{active.rank} / {photos.length}
               </span>
               <span className={`text-sm font-semibold ${
                 active.score > 0 ? 'text-green-400'
@@ -161,7 +181,7 @@ export default function Rankings() {
               ‹
             </button>
           )}
-          {lightboxIdx! < photos.length - 1 && (
+          {lightboxIdx! < visiblePhotos.length - 1 && (
             <button
               onClick={(e) => { e.stopPropagation(); next() }}
               className="absolute right-2 top-1/2 -translate-y-1/2 w-12 h-12 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white text-xl transition-colors"

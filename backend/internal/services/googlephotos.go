@@ -117,38 +117,61 @@ func (s *GooglePhotosService) getClient(ctx context.Context) (*http.Client, erro
 	return oauth2.NewClient(ctx, oauth2.StaticTokenSource(fresh)), nil
 }
 
-// RefreshBaseURL fetches a fresh base URL for a photo by its Google Photos ID
-// and updates the stored record. Call this when url_expires_at has passed.
-func (s *GooglePhotosService) RefreshBaseURL(ctx context.Context, googlePhotosID string) (string, error) {
+// RefreshSessionURLs re-lists all media items for the given picker session and
+// updates every photo's base_url in the DB. Returns the fresh URL for googlePhotosID.
+func (s *GooglePhotosService) RefreshSessionURLs(ctx context.Context, sessionID, googlePhotosID string) (string, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("no picker session stored for this photo — re-run the picker sync from the admin panel")
+	}
 	client, err := s.getClient(ctx)
 	if err != nil {
 		return "", err
 	}
-	resp, err := client.Get(pickerAPIBase + "/mediaItems/" + googlePhotosID)
-	if err != nil {
-		return "", fmt.Errorf("refresh media item: %w", err)
-	}
-	data, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("picker API %d refreshing %s: %s", resp.StatusCode, googlePhotosID, string(data))
-	}
-	var item pickerMediaItem
-	if err := json.Unmarshal(data, &item); err != nil {
-		return "", fmt.Errorf("parse media item: %w", err)
-	}
-	if item.MediaFile.BaseURL == "" {
-		return "", fmt.Errorf("empty base URL returned for %s", googlePhotosID)
-	}
+
+	freshURL := ""
+	pageToken := ""
 	expiresAt := time.Now().Add(pickerURLTTL)
-	_, err = s.db.Exec(ctx,
-		"UPDATE photos SET base_url = $1, url_expires_at = $2 WHERE google_photos_id = $3",
-		item.MediaFile.BaseURL, expiresAt, googlePhotosID,
-	)
-	if err != nil {
-		return "", fmt.Errorf("update photo url: %w", err)
+
+	for {
+		u := fmt.Sprintf("%s/mediaItems?sessionId=%s&pageSize=100", pickerAPIBase, sessionID)
+		if pageToken != "" {
+			u += "&pageToken=" + pageToken
+		}
+		resp, err := client.Get(u)
+		if err != nil {
+			return "", fmt.Errorf("list media items: %w", err)
+		}
+		data, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("picker API %d listing session %s: %s — re-run the picker sync from the admin panel", resp.StatusCode, sessionID, string(data))
+		}
+		var result pickerMediaItemsResponse
+		if err := json.Unmarshal(data, &result); err != nil {
+			return "", fmt.Errorf("parse media items: %w", err)
+		}
+		for _, item := range result.MediaItems {
+			if item.MediaFile.BaseURL == "" {
+				continue
+			}
+			_, _ = s.db.Exec(ctx,
+				"UPDATE photos SET base_url = $1, url_expires_at = $2 WHERE google_photos_id = $3",
+				item.MediaFile.BaseURL, expiresAt, item.ID,
+			)
+			if item.ID == googlePhotosID {
+				freshURL = item.MediaFile.BaseURL
+			}
+		}
+		if result.NextPageToken == "" {
+			break
+		}
+		pageToken = result.NextPageToken
 	}
-	return item.MediaFile.BaseURL, nil
+
+	if freshURL == "" {
+		return "", fmt.Errorf("photo not found in session %s — re-run the picker sync from the admin panel", sessionID)
+	}
+	return freshURL, nil
 }
 
 // --- Picker API ---
@@ -256,11 +279,11 @@ func (s *GooglePhotosService) ImportPickerSession(ctx context.Context, sessionID
 				continue
 			}
 			if _, err := s.db.Exec(ctx, `
-				INSERT INTO photos (google_photos_id, base_url, url_expires_at, filename)
-				VALUES ($1, $2, $3, $4)
+				INSERT INTO photos (google_photos_id, base_url, url_expires_at, filename, picker_session_id)
+				VALUES ($1, $2, $3, $4, $5)
 				ON CONFLICT (google_photos_id) DO UPDATE
-				SET base_url = $2, url_expires_at = $3, filename = $4
-			`, item.ID, item.MediaFile.BaseURL, expiresAt, item.MediaFile.Filename); err != nil {
+				SET base_url = $2, url_expires_at = $3, filename = $4, picker_session_id = $5
+			`, item.ID, item.MediaFile.BaseURL, expiresAt, item.MediaFile.Filename, sessionID); err != nil {
 				return total, fmt.Errorf("upsert photo %s: %w", item.ID, err)
 			}
 			total++
@@ -271,10 +294,6 @@ func (s *GooglePhotosService) ImportPickerSession(ctx context.Context, sessionID
 		}
 		pageToken = result.NextPageToken
 	}
-
-	// Clean up session after import (best-effort)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodDelete, pickerAPIBase+"/sessions/"+sessionID, nil)
-	client.Do(req)
 
 	return total, nil
 }
