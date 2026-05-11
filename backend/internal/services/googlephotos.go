@@ -117,6 +117,81 @@ func (s *GooglePhotosService) getClient(ctx context.Context) (*http.Client, erro
 	return oauth2.NewClient(ctx, oauth2.StaticTokenSource(fresh)), nil
 }
 
+// RefreshAllPhotos re-lists every picker session stored in the DB and updates
+// base_url, url_expires_at, and capture_time (if not already set) for all photos.
+func (s *GooglePhotosService) RefreshAllPhotos(ctx context.Context) (int, error) {
+	rows, err := s.db.Query(ctx, "SELECT DISTINCT picker_session_id FROM photos WHERE picker_session_id IS NOT NULL")
+	if err != nil {
+		return 0, err
+	}
+	var sessionIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			continue
+		}
+		sessionIDs = append(sessionIDs, id)
+	}
+	rows.Close()
+
+	if len(sessionIDs) == 0 {
+		return 0, nil
+	}
+
+	client, err := s.getClient(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	total := 0
+	expiresAt := time.Now().Add(pickerURLTTL)
+
+	for _, sessionID := range sessionIDs {
+		pageToken := ""
+		for {
+			u := fmt.Sprintf("%s/mediaItems?sessionId=%s&pageSize=100", pickerAPIBase, sessionID)
+			if pageToken != "" {
+				u += "&pageToken=" + pageToken
+			}
+			resp, err := client.Get(u)
+			if err != nil {
+				return total, fmt.Errorf("list session %s: %w", sessionID, err)
+			}
+			data, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				break // session may have expired; skip it
+			}
+			var result pickerMediaItemsResponse
+			if err := json.Unmarshal(data, &result); err != nil {
+				break
+			}
+			for _, item := range result.MediaItems {
+				if item.MediaFile.BaseURL == "" {
+					continue
+				}
+				var captureTime *time.Time
+				if item.CreateTime != "" {
+					if t, err := time.Parse(time.RFC3339, item.CreateTime); err == nil {
+						captureTime = &t
+					}
+				}
+				tag, _ := s.db.Exec(ctx,
+					"UPDATE photos SET base_url = $1, url_expires_at = $2, capture_time = COALESCE(capture_time, $3) WHERE google_photos_id = $4",
+					item.MediaFile.BaseURL, expiresAt, captureTime, item.ID,
+				)
+				total += int(tag.RowsAffected())
+			}
+			if result.NextPageToken == "" {
+				break
+			}
+			pageToken = result.NextPageToken
+		}
+	}
+
+	return total, nil
+}
+
 // RefreshSessionURLs re-lists all media items for the given picker session and
 // updates every photo's base_url in the DB. Returns the fresh URL for googlePhotosID.
 func (s *GooglePhotosService) RefreshSessionURLs(ctx context.Context, sessionID, googlePhotosID string) (string, error) {
@@ -154,9 +229,15 @@ func (s *GooglePhotosService) RefreshSessionURLs(ctx context.Context, sessionID,
 			if item.MediaFile.BaseURL == "" {
 				continue
 			}
+			var captureTime *time.Time
+			if item.CreateTime != "" {
+				if t, err := time.Parse(time.RFC3339, item.CreateTime); err == nil {
+					captureTime = &t
+				}
+			}
 			_, _ = s.db.Exec(ctx,
-				"UPDATE photos SET base_url = $1, url_expires_at = $2 WHERE google_photos_id = $3",
-				item.MediaFile.BaseURL, expiresAt, item.ID,
+				"UPDATE photos SET base_url = $1, url_expires_at = $2, capture_time = COALESCE(capture_time, $3) WHERE google_photos_id = $4",
+				item.MediaFile.BaseURL, expiresAt, captureTime, item.ID,
 			)
 			if item.ID == googlePhotosID {
 				freshURL = item.MediaFile.BaseURL
@@ -184,9 +265,10 @@ type PickerSession struct {
 }
 
 type pickerMediaItem struct {
-	ID        string `json:"id"`
-	Type      string `json:"type"`
-	MediaFile struct {
+	ID         string `json:"id"`
+	Type       string `json:"type"`
+	CreateTime string `json:"createTime"`
+	MediaFile  struct {
 		BaseURL  string `json:"baseUrl"`
 		MimeType string `json:"mimeType"`
 		Filename string `json:"filename"`
@@ -278,12 +360,18 @@ func (s *GooglePhotosService) ImportPickerSession(ctx context.Context, sessionID
 			default:
 				continue
 			}
+			var captureTime *time.Time
+			if item.CreateTime != "" {
+				if t, err := time.Parse(time.RFC3339, item.CreateTime); err == nil {
+					captureTime = &t
+				}
+			}
 			if _, err := s.db.Exec(ctx, `
-				INSERT INTO photos (google_photos_id, base_url, url_expires_at, filename, picker_session_id)
-				VALUES ($1, $2, $3, $4, $5)
+				INSERT INTO photos (google_photos_id, base_url, url_expires_at, filename, picker_session_id, capture_time)
+				VALUES ($1, $2, $3, $4, $5, $6)
 				ON CONFLICT (google_photos_id) DO UPDATE
-				SET base_url = $2, url_expires_at = $3, filename = $4, picker_session_id = $5
-			`, item.ID, item.MediaFile.BaseURL, expiresAt, item.MediaFile.Filename, sessionID); err != nil {
+				SET base_url = $2, url_expires_at = $3, filename = $4, picker_session_id = $5, capture_time = $6
+			`, item.ID, item.MediaFile.BaseURL, expiresAt, item.MediaFile.Filename, sessionID, captureTime); err != nil {
 				return total, fmt.Errorf("upsert photo %s: %w", item.ID, err)
 			}
 			total++

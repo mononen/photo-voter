@@ -41,6 +41,7 @@ export default function Admin() {
   const [session, setSession] = useState<PickerSession | null>(null)
   const [importResult, setImportResult] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [refreshResult, setRefreshResult] = useState<string | null>(null)
 
   const { data: settings, isLoading, refetch: refetchSettings } = useQuery<Settings>({
     queryKey: ['adminSettings'],
@@ -55,6 +56,17 @@ export default function Admin() {
   const clearPhotos = useMutation({
     mutationFn: () => api.delete('/admin/photos'),
     onSuccess: () => { setConfirmClear(false); refetchSettings() },
+  })
+
+  const refreshPhotos = useMutation({
+    mutationFn: () => api.post('/admin/photos/refresh'),
+    onSuccess: (res) => {
+      setRefreshResult(`Refreshed ${res.data.refreshed} photo${res.data.refreshed === 1 ? '' : 's'}`)
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      setRefreshResult(`Error: ${msg ?? 'refresh failed'}`)
+    },
   })
 
   const { data: sessionStatus } = useQuery<PickerSession>({
@@ -230,31 +242,49 @@ export default function Admin() {
               </p>
 
               {settings?.photo_count ? (
-                confirmClear ? (
+                <div className="flex flex-col gap-3">
                   <div className="flex items-center gap-3">
-                    <span className="text-sm text-gray-300">Delete all photos and votes?</span>
                     <button
-                      onClick={() => clearPhotos.mutate()}
-                      disabled={clearPhotos.isPending}
-                      className="px-3 py-1.5 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-40 transition-colors"
+                      onClick={() => { setRefreshResult(null); refreshPhotos.mutate() }}
+                      disabled={refreshPhotos.isPending}
+                      className="px-4 py-2 text-sm bg-white/10 hover:bg-white/15 text-white rounded-lg disabled:opacity-40 transition-colors"
                     >
-                      {clearPhotos.isPending ? 'Clearing…' : 'Yes, clear all'}
-                    </button>
-                    <button
-                      onClick={() => setConfirmClear(false)}
-                      className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
-                    >
-                      Cancel
+                      {refreshPhotos.isPending ? 'Refreshing…' : 'Refresh Photo Metadata'}
                     </button>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmClear(true)}
-                    className="px-4 py-2 text-sm border border-red-500/40 text-red-400 rounded-lg hover:bg-red-500/10 transition-colors"
-                  >
-                    Clear All Photos
-                  </button>
-                )
+                  {refreshResult && (
+                    <p className={`text-sm ${refreshResult.startsWith('Error') ? 'text-red-400' : 'text-green-400'}`}>
+                      {refreshResult}
+                    </p>
+                  )}
+                  <div className="border-t border-white/10 pt-3">
+                    {confirmClear ? (
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-300">Delete all photos and votes?</span>
+                        <button
+                          onClick={() => clearPhotos.mutate()}
+                          disabled={clearPhotos.isPending}
+                          className="px-3 py-1.5 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-40 transition-colors"
+                        >
+                          {clearPhotos.isPending ? 'Clearing…' : 'Yes, clear all'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmClear(false)}
+                          className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmClear(true)}
+                        className="px-4 py-2 text-sm border border-red-500/40 text-red-400 rounded-lg hover:bg-red-500/10 transition-colors"
+                      >
+                        Clear All Photos
+                      </button>
+                    )}
+                  </div>
+                </div>
               ) : null}
             </section>
 

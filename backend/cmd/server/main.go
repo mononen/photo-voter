@@ -63,6 +63,7 @@ func main() {
 
 	photos := api.Group("/photos")
 	photos.Get("/next", middleware.JWT(cfg.JWTSecret), photosHandler.Next)
+	photos.Get("/batch", middleware.JWT(cfg.JWTSecret), photosHandler.Batch)
 	photos.Get("/rankings", middleware.JWT(cfg.JWTSecret), middleware.AdminOnly(), photosHandler.Rankings)
 	photos.Get("/:id/image", photosHandler.ProxyImage) // public — UUID is unguessable
 
@@ -77,6 +78,7 @@ func main() {
 	admin.Get("/stats", adminHandler.GetStats)
 	admin.Delete("/photos", adminHandler.ClearPhotos)
 	admin.Get("/auth/google/url", adminHandler.GoogleAuthURL)
+	admin.Post("/photos/refresh", adminHandler.RefreshPhotos)
 	admin.Post("/picker/session", adminHandler.StartPickerSession)
 	admin.Get("/picker/session/:id", adminHandler.CheckPickerSession)
 	admin.Post("/picker/session/:id/import", adminHandler.ImportPickerSession)

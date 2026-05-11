@@ -1,21 +1,17 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import api from '../api/client'
 import PhotoCard from '../components/PhotoCard'
 import VoteButtons from '../components/VoteButtons'
+import Filmstrip from '../components/Filmstrip'
 import { useAuth } from '../hooks/useAuth'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
-interface Photo {
+interface BatchPhoto {
   id: string
-}
-
-async function fetchNextPhoto(): Promise<Photo | null> {
-  const res = await api.get('/photos/next', { validateStatus: (s) => s < 500 })
-  if (res.status === 204) return null
-  return res.data as Photo
+  filename: string
 }
 
 function photoUrl(id: string) {
@@ -26,8 +22,14 @@ interface LbTransform { scale: number; x: number; y: number }
 const LB_RESET: LbTransform = { scale: 1, x: 0, y: 0 }
 
 export default function Vote() {
-  const queryClient = useQueryClient()
   const { logout, isAdmin } = useAuth()
+
+  const [batch, setBatch] = useState<BatchPhoto[]>([])
+  const [batchIndex, setBatchIndex] = useState(0)
+  const [batchVotes, setBatchVotes] = useState<Record<string, number>>({})
+  const [isLoading, setIsLoading] = useState(true)
+  const [allDone, setAllDone] = useState(false)
+
   const [exitVote, setExitVote] = useState<number | null>(null)
   const [exitPhotoId, setExitPhotoId] = useState<string | null>(null)
   const [lightboxOpen, setLightboxOpen] = useState(false)
@@ -39,24 +41,31 @@ export default function Vote() {
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null)
   const hasDraggedRef = useRef(false)
 
-  const prefetchRef = useRef<{ animationDone: boolean; photo?: Photo | null }>({
-    animationDone: true,
-  })
-
-  const { data: photo, isLoading } = useQuery<Photo | null>({
-    queryKey: ['nextPhoto'],
-    queryFn: fetchNextPhoto,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-  })
-
   const vote = useMutation({
     mutationFn: ({ v, photoId }: { v: number; photoId: string }) =>
       api.post('/votes', { photo_id: photoId, vote: v }),
   })
 
-  // Derived display values — declared early so effects can reference them
-  const renderedId = exitVote !== null ? exitPhotoId : (photo?.id ?? null)
+  const loadNextBatch = useCallback(async () => {
+    setIsLoading(true)
+    const res = await api.get('/photos/batch', { validateStatus: (s) => s < 500 })
+    setIsLoading(false)
+    if (res.status === 204) {
+      setAllDone(true)
+      return
+    }
+    const photos: BatchPhoto[] = res.data.photos
+    setBatch(photos)
+    setBatchIndex(0)
+    setBatchVotes({})
+    photos.forEach((p) => { new Image().src = photoUrl(p.id) })
+  }, [])
+
+  useEffect(() => { loadNextBatch() }, [loadNextBatch])
+
+  // Derived display values
+  const activeId = exitVote !== null ? exitPhotoId : (batch[batchIndex]?.id ?? null)
+  const renderedId = activeId
   const renderedUrl = renderedId ? photoUrl(renderedId) : null
 
   const closeLightbox = useCallback(() => {
@@ -66,25 +75,18 @@ export default function Vote() {
     setHiResLoaded(false)
   }, [])
 
-  // When lightbox opens, lazily load a version sized to the device's actual pixel dimensions
   useEffect(() => {
     if (!lightboxOpen || !renderedId) return
     setHiResUrl(null)
     setHiResLoaded(false)
-
-    // Use at least 2× multiplier so non-retina desktops (DPR=1) still get a
-    // higher-resolution image that looks sharp when zoomed in.
     const dpr = Math.max(window.devicePixelRatio, 2)
     const w = Math.min(Math.round(window.innerWidth * dpr), 4096)
     const h = Math.min(Math.round(window.innerHeight * dpr), 4096)
     const url = `${API_BASE}/api/photos/${renderedId}/image?w=${w}&h=${h}`
-
-    // Only fetch hi-res if it would actually be larger than the base (1920×1080).
     if (w > 1920 || h > 1080) setHiResUrl(url)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightboxOpen, renderedId])
 
-  // Keyboard close
   useEffect(() => {
     if (!lightboxOpen) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeLightbox() }
@@ -92,18 +94,15 @@ export default function Vote() {
     return () => window.removeEventListener('keydown', onKey)
   }, [lightboxOpen, closeLightbox])
 
-  // Wheel zoom — must be non-passive to preventDefault
   useEffect(() => {
     const el = lbRef.current
     if (!lightboxOpen || !el) return
-
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       setLbTransform((prev) => {
         const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
         const newScale = Math.min(Math.max(prev.scale * factor, 1), 8)
         if (newScale <= 1) return LB_RESET
-
         const rect = el.getBoundingClientRect()
         const cx = e.clientX - rect.left - rect.width / 2
         const cy = e.clientY - rect.top - rect.height / 2
@@ -115,7 +114,6 @@ export default function Vote() {
         }
       })
     }
-
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [lightboxOpen])
@@ -144,39 +142,30 @@ export default function Vote() {
 
   function handleVote(v: number) {
     if (exitVote !== null) return
-    const currentId = photo?.id ?? ''
+    const currentId = batch[batchIndex].id
 
-    prefetchRef.current = { animationDone: false }
     setExitVote(v)
     setExitPhotoId(currentId)
 
-    vote.mutateAsync({ v, photoId: currentId })
-      .then(() => fetchNextPhoto())
-      .then((next) => {
-        if (next) new Image().src = photoUrl(next.id)
-        if (prefetchRef.current.animationDone) {
-          queryClient.setQueryData(['nextPhoto'], next ?? null)
-        } else {
-          prefetchRef.current.photo = next ?? null
-        }
-      })
-      .catch(() => {
-        if (prefetchRef.current.animationDone) {
-          queryClient.invalidateQueries({ queryKey: ['nextPhoto'] })
-        }
-      })
+    vote.mutateAsync({ v, photoId: currentId }).catch(() => {})
+
+    const newVotes = { ...batchVotes, [currentId]: v }
 
     setTimeout(() => {
-      const prev = prefetchRef.current
-      prefetchRef.current = { animationDone: true }
       setExitVote(null)
       setExitPhotoId(null)
+      setBatchVotes(newVotes)
 
-      if ('photo' in prev) {
-        queryClient.setQueryData(['nextPhoto'], prev.photo)
-      } else {
-        queryClient.invalidateQueries({ queryKey: ['nextPhoto'] })
+      // Find next unvoted photo in batch (scan forward, wrap around)
+      const n = batch.length
+      let next: number | null = null
+      for (let i = 1; i < n; i++) {
+        const idx = (batchIndex + i) % n
+        if (!(batch[idx].id in newVotes)) { next = idx; break }
       }
+
+      if (next !== null) setBatchIndex(next)
+      else loadNextBatch()
     }, 300)
   }
 
@@ -208,10 +197,10 @@ export default function Vote() {
         </button>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center gap-8 p-6">
+      <main className="flex-1 flex flex-col items-center justify-center gap-6 p-6">
         {isLoading ? (
           <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
-        ) : !photo && exitVote === null ? (
+        ) : allDone && exitVote === null ? (
           <div className="text-center space-y-4">
             <p className="text-2xl font-bold">All done!</p>
             <p className="text-gray-400">You've voted on every photo.</p>
@@ -223,6 +212,15 @@ export default function Vote() {
           </div>
         ) : renderedUrl ? (
           <>
+            {batch.length > 1 && (
+              <Filmstrip
+                photos={batch}
+                activeIndex={batchIndex}
+                votes={batchVotes}
+                onSelect={(i) => { if (exitVote === null) setBatchIndex(i) }}
+                disabled={exitVote !== null}
+              />
+            )}
             <PhotoCard
               key={renderedId ?? undefined}
               url={renderedUrl}
@@ -273,14 +271,12 @@ export default function Vote() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Base image — shown immediately (already cached from vote page) */}
             <img
               src={renderedUrl}
               alt=""
               draggable={false}
               className="max-w-full max-h-full object-contain select-none block"
             />
-            {/* Hi-res image — fades in once loaded */}
             {hiResUrl && (
               <img
                 key={hiResUrl}

@@ -122,6 +122,102 @@ func (h *PhotosHandler) ProxyImage(c fiber.Ctx) error {
 	return err
 }
 
+func (h *PhotosHandler) Batch(c fiber.Ctx) error {
+	userID := c.Locals("userID").(string)
+
+	// Check if any photos have capture_time populated. If none do (cold start
+	// before a re-import), fall back to returning a small filename-ordered slice.
+	var captureCount int
+	_ = h.db.QueryRow(c.Context(), "SELECT COUNT(*) FROM photos WHERE capture_time IS NOT NULL").Scan(&captureCount)
+
+	type batchPhoto struct {
+		ID       string `json:"id"`
+		Filename string `json:"filename"`
+	}
+
+	if captureCount == 0 {
+		// Fallback: least-voted photo that the user hasn't voted on, just like /next.
+		var id, filename string
+		err := h.db.QueryRow(c.Context(), `
+			SELECT p.id, COALESCE(p.filename, '')
+			FROM photos p
+			LEFT JOIN (
+				SELECT photo_id, COUNT(*) AS total_votes
+				FROM votes
+				GROUP BY photo_id
+			) vc ON vc.photo_id = p.id
+			WHERE p.id NOT IN (SELECT photo_id FROM votes WHERE user_id = $1)
+			ORDER BY COALESCE(vc.total_votes, 0) ASC, RANDOM()
+			LIMIT 1
+		`, userID).Scan(&id, &filename)
+		if err == pgx.ErrNoRows {
+			return c.SendStatus(fiber.StatusNoContent)
+		}
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		}
+		return c.JSON(fiber.Map{"photos": []batchPhoto{{ID: id, Filename: filename}}})
+	}
+
+	rows, err := h.db.Query(c.Context(), `
+		WITH ordered AS (
+			SELECT id, filename, capture_time,
+			       LAG(capture_time) OVER (ORDER BY capture_time, filename) AS prev_time
+			FROM photos
+		),
+		bursts AS (
+			SELECT id, filename, capture_time,
+			       SUM(CASE
+			           WHEN prev_time IS NULL THEN 1
+			           WHEN capture_time - prev_time > INTERVAL '5 seconds' THEN 1
+			           ELSE 0
+			       END) OVER (ORDER BY capture_time, filename) AS burst_id
+			FROM ordered
+		),
+		burst_stats AS (
+			SELECT b.burst_id,
+			       COUNT(DISTINCT b.id)            AS total_in_burst,
+			       COUNT(DISTINCT v_user.photo_id) AS user_voted,
+			       COUNT(DISTINCT v_all.photo_id)  AS all_votes_in_burst
+			FROM bursts b
+			LEFT JOIN votes v_user ON v_user.photo_id = b.id AND v_user.user_id = $1
+			LEFT JOIN votes v_all  ON v_all.photo_id  = b.id
+			GROUP BY b.burst_id
+		),
+		target_burst AS (
+			SELECT burst_id
+			FROM burst_stats
+			WHERE user_voted < total_in_burst
+			ORDER BY all_votes_in_burst ASC, burst_id ASC
+			LIMIT 1
+		)
+		SELECT b.id, COALESCE(b.filename, '')
+		FROM bursts b
+		WHERE b.burst_id = (SELECT burst_id FROM target_burst)
+		ORDER BY b.capture_time, b.filename
+	`, userID)
+
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+	}
+	defer rows.Close()
+
+	photos := make([]batchPhoto, 0)
+	for rows.Next() {
+		var p batchPhoto
+		if err := rows.Scan(&p.ID, &p.Filename); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+		}
+		photos = append(photos, p)
+	}
+
+	if len(photos) == 0 {
+		return c.SendStatus(fiber.StatusNoContent)
+	}
+
+	return c.JSON(fiber.Map{"photos": photos})
+}
+
 func (h *PhotosHandler) Rankings(c fiber.Ctx) error {
 	rows, err := h.db.Query(c.Context(), `
 		SELECT p.id, COALESCE(p.filename, '') AS filename,

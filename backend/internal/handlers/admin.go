@@ -143,6 +143,14 @@ func (h *AdminHandler) CheckPickerSession(c fiber.Ctx) error {
 	})
 }
 
+func (h *AdminHandler) RefreshPhotos(c fiber.Ctx) error {
+	count, err := h.gp.RefreshAllPhotos(c.Context())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"refreshed": count})
+}
+
 func (h *AdminHandler) ImportPickerSession(c fiber.Ctx) error {
 	sessionID := c.Params("id")
 	count, err := h.gp.ImportPickerSession(c.Context(), sessionID)
