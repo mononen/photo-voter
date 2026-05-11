@@ -1,0 +1,56 @@
+name: photo-voter
+
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Before starting:
+#   - Fill in the two image: fields below
+#   - Create a .env file from .env.example and set real values
+#   - Set POSTGRES_PASSWORD in .env (must match DATABASE_URL)
+#
+# Frontend image must be built with:
+#   docker build --target production \
+#     --build-arg VITE_API_URL= \   # empty = relative URLs, nginx proxies /api/ to backend
+#     -t your-registry/photo-voter-frontend:latest \
+#     ./frontend
+#
+# Backend image must be built with:
+#   docker build -t your-registry/photo-voter-backend:latest ./backend
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: photovoter
+      POSTGRES_USER: photovoter
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U photovoter"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: # TODO your-registry/photo-voter-backend:latest
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: # TODO your-registry/photo-voter-frontend:latest
+    restart: unless-stopped
+    # Bind to loopback — let your reverse proxy handle external traffic and TLS.
+    # Point your reverse proxy at 127.0.0.1:<host_port>.
+    # /api/ requests are proxied internally to the backend container by nginx.
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
