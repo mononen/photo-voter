@@ -10,6 +10,7 @@ import Vote from './pages/Vote'
 import Rankings from './pages/Rankings'
 import Admin from './pages/Admin'
 import Leaderboard from './pages/Leaderboard'
+import People from './pages/People'
 
 const queryClient = new QueryClient()
 
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/rankings" element={<RankingsRoute><Rankings /></RankingsRoute>} />
             <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
             <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
+            <Route path="/people" element={<AdminRoute><People /></AdminRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AuthProvider>

@@ -214,6 +214,11 @@ export default function Vote() {
             </Link>
           )}
           {isAdmin && (
+            <Link to="/people" className="text-sm text-gray-400 hover:text-white transition-colors">
+              People
+            </Link>
+          )}
+          {isAdmin && (
             <Link to="/admin" className="text-sm text-gray-400 hover:text-white transition-colors">
               Admin
             </Link>

@@ -89,6 +89,7 @@ func main() {
 	admin.Post("/picker/session", adminHandler.StartPickerSession)
 	admin.Get("/picker/session/:id", adminHandler.CheckPickerSession)
 	admin.Post("/picker/session/:id/import", adminHandler.ImportPickerSession)
+	admin.Get("/tags", tagsHandler.AdminSummary)
 	admin.Get("/photos/:id/tags", tagsHandler.AdminListForPhoto)
 
 	log.Printf("Server listening on :%s", cfg.Port)

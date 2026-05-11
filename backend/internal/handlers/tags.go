@@ -145,6 +145,52 @@ type adminTagItem struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// GET /api/admin/tags — all tagged photos with aggregated tag data
+func (h *TagsHandler) AdminSummary(c fiber.Ctx) error {
+	rows, err := h.db.Query(c.Context(), `
+		SELECT p.id, p.filename, pt.name,
+		       array_agg(u.name ORDER BY u.name) AS taggers
+		FROM photo_tags pt
+		JOIN photos p ON p.id = pt.photo_id
+		JOIN users u ON u.id = pt.user_id
+		GROUP BY p.id, p.filename, pt.name
+		ORDER BY p.id, pt.name
+	`)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+	}
+	defer rows.Close()
+
+	type tagEntry struct {
+		Name    string   `json:"name"`
+		Taggers []string `json:"taggers"`
+	}
+	type photoEntry struct {
+		PhotoID  string     `json:"photo_id"`
+		Filename string     `json:"filename"`
+		Tags     []tagEntry `json:"tags"`
+	}
+
+	result := make([]photoEntry, 0)
+	index := map[string]int{}
+
+	for rows.Next() {
+		var photoID, filename, name string
+		var taggers []string
+		if err := rows.Scan(&photoID, &filename, &name, &taggers); err != nil {
+			continue
+		}
+		idx, exists := index[photoID]
+		if !exists {
+			result = append(result, photoEntry{PhotoID: photoID, Filename: filename, Tags: []tagEntry{}})
+			idx = len(result) - 1
+			index[photoID] = idx
+		}
+		result[idx].Tags = append(result[idx].Tags, tagEntry{Name: name, Taggers: taggers})
+	}
+	return c.JSON(result)
+}
+
 // GET /api/admin/photos/:id/tags
 func (h *TagsHandler) AdminListForPhoto(c fiber.Ctx) error {
 	photoID := c.Params("id")

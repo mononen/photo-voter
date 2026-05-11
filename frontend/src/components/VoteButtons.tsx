@@ -6,9 +6,9 @@ interface Props {
 }
 
 const CRITERIA = [
-  { icon: '✗', color: 'text-red-500', label: 'Bad', sub: 'awful', desc: 'nothing in focus, nobody in frame' },
-  { icon: '—', color: 'text-gray-400', label: 'Mid', sub: 'decent', desc: "someone's in focus and in frame, but nothing special" },
-  { icon: '✓', color: 'text-green-500', label: 'Good', sub: 'banger', desc: 'in focus, in frame, doing something' },
+  { icon: '✗', color: 'text-red-500', label: 'Bad', sub: 'awful', desc: 'nothing in focus, nobody in frame', key: 'a' },
+  { icon: '—', color: 'text-gray-400', label: 'Mid', sub: 'decent', desc: "someone's in focus and in frame, but nothing special", key: 's' },
+  { icon: '✓', color: 'text-green-500', label: 'Good', sub: 'banger', desc: 'in focus, in frame, doing something', key: 'd' },
 ]
 
 export default function VoteButtons({ onVote, disabled }: Props) {
@@ -17,14 +17,21 @@ export default function VoteButtons({ onVote, disabled }: Props) {
   return (
     <div className="relative flex items-center gap-3">
       {showInfo && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-gray-800/95 border border-gray-600 rounded-xl px-4 py-3 text-sm shadow-xl z-10 flex gap-4 whitespace-nowrap">
-          {CRITERIA.map(({ icon, color, label, sub, desc }, i) => (
-            <div key={label} className={`flex flex-col gap-0.5 px-3 ${i > 0 ? 'border-l border-gray-600' : ''}`}>
-              <span className={`${color} font-bold text-base`}>{icon} <span className="text-gray-200 font-semibold">{label}</span></span>
-              <span className="text-gray-400 italic text-xs">{sub}</span>
-              <span className="text-gray-300 text-xs">{desc}</span>
-            </div>
-          ))}
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 bg-gray-800/95 border border-gray-600 rounded-xl px-4 py-3 text-sm shadow-xl z-10 whitespace-nowrap">
+          <div className="flex gap-4">
+            {CRITERIA.map(({ icon, color, label, sub, desc, key }, i) => (
+              <div key={label} className={`flex flex-col gap-0.5 px-3 ${i > 0 ? 'border-l border-gray-600' : ''}`}>
+                <span className={`${color} font-bold text-base`}>{icon} <span className="text-gray-200 font-semibold">{label}</span></span>
+                <span className="text-gray-400 italic text-xs">{sub}</span>
+                <span className="text-gray-300 text-xs">{desc}</span>
+                <kbd className="mt-1 self-start px-1.5 py-0.5 bg-gray-700 border border-gray-500 rounded text-gray-300 text-xs font-mono leading-none">{key}</kbd>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2.5 pt-2.5 border-t border-gray-600 flex gap-4 justify-center text-xs text-gray-400">
+            <span><kbd className="px-1.5 py-0.5 bg-gray-700 border border-gray-500 rounded text-gray-300 font-mono leading-none">f</kbd> <kbd className="px-1.5 py-0.5 bg-gray-700 border border-gray-500 rounded text-gray-300 font-mono leading-none">←</kbd> prev</span>
+            <span><kbd className="px-1.5 py-0.5 bg-gray-700 border border-gray-500 rounded text-gray-300 font-mono leading-none">g</kbd> <kbd className="px-1.5 py-0.5 bg-gray-700 border border-gray-500 rounded text-gray-300 font-mono leading-none">→</kbd> next</span>
+          </div>
         </div>
       )}
 
