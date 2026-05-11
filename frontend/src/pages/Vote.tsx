@@ -5,6 +5,7 @@ import api from '../api/client'
 import PhotoCard from '../components/PhotoCard'
 import VoteButtons from '../components/VoteButtons'
 import Filmstrip from '../components/Filmstrip'
+import PhotoTags from '../components/PhotoTags'
 import { useAuth } from '../hooks/useAuth'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
@@ -173,10 +174,10 @@ export default function Vote() {
 
   return (
     <div
-      className="flex flex-col min-h-screen text-white"
+      className="h-screen overflow-hidden flex flex-col text-white"
       style={{ background: 'radial-gradient(ellipse at 50% 42%, #1a1c2e 0%, #07070a 68%)' }}
     >
-      <header className="flex justify-between items-center px-6 py-4">
+      <header className="flex justify-between items-center px-6 py-2 flex-shrink-0">
         <div className="flex gap-4">
           <Link to="/leaderboard" className="text-sm text-gray-400 hover:text-white transition-colors">
             Leaderboard
@@ -197,7 +198,7 @@ export default function Vote() {
         </button>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center gap-6 p-6">
+      <main className="flex-1 min-h-0 flex flex-col items-center gap-3 px-4 py-2">
         {isLoading ? (
           <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
         ) : allDone && exitVote === null ? (
@@ -221,13 +222,21 @@ export default function Vote() {
                 disabled={exitVote !== null}
               />
             )}
-            <PhotoCard
-              key={renderedId ?? undefined}
-              url={renderedUrl}
-              exitVote={exitVote}
-              onZoom={() => setLightboxOpen(true)}
-            />
+            <div className="flex-1 min-h-0 w-full flex items-center justify-center">
+              <PhotoCard
+                key={renderedId ?? undefined}
+                url={renderedUrl}
+                exitVote={exitVote}
+                onZoom={() => setLightboxOpen(true)}
+              />
+            </div>
             <VoteButtons onVote={handleVote} disabled={exitVote !== null} />
+            {batch[batchIndex] && (
+              <PhotoTags
+                photoId={batch[batchIndex].id}
+                disabled={exitVote !== null}
+              />
+            )}
           </>
         ) : null}
       </main>

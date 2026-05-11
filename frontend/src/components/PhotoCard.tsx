@@ -16,12 +16,12 @@ export default function PhotoCard({ url, exitVote, onZoom }: Props) {
 
   return (
     <div
-      className={`group relative w-full max-w-3xl rounded-xl shadow-2xl bg-gray-900 border border-white/20 p-3 photo-enter ${exitClass}`}
+      className={`group relative w-full max-w-3xl h-full flex flex-col rounded-xl shadow-2xl bg-gray-900 border border-white/20 p-3 photo-enter ${exitClass}`}
       onClick={onZoom}
       style={onZoom ? { cursor: 'zoom-in' } : undefined}
     >
       {!loaded && (
-        <div className="flex items-center justify-center" style={{ minHeight: '20rem' }}>
+        <div className="flex-1 flex items-center justify-center min-h-40">
           <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
         </div>
       )}
@@ -29,7 +29,7 @@ export default function PhotoCard({ url, exitVote, onZoom }: Props) {
         key={url}
         src={url}
         alt=""
-        className={`w-full h-auto max-h-[75vh] object-contain rounded-lg transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0 absolute inset-0'}`}
+        className={`object-contain rounded-lg transition-opacity duration-300 ${loaded ? 'flex-1 min-h-0 w-full opacity-100' : 'opacity-0 absolute inset-0'}`}
         onLoad={() => setLoaded(true)}
       />
       {loaded && onZoom && (

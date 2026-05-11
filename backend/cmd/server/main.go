@@ -40,6 +40,7 @@ func main() {
 	authHandler := handlers.NewAuthHandler(db, cfg.JWTSecret)
 	photosHandler := handlers.NewPhotosHandler(db, gp)
 	votesHandler := handlers.NewVotesHandler(db)
+	tagsHandler := handlers.NewTagsHandler(db)
 	adminHandler := handlers.NewAdminHandler(db, gp, cfg.FrontendURL)
 
 	app := fiber.New(fiber.Config{
@@ -66,9 +67,15 @@ func main() {
 	photos.Get("/batch", middleware.JWT(cfg.JWTSecret), photosHandler.Batch)
 	photos.Get("/rankings", middleware.JWT(cfg.JWTSecret), middleware.AdminOnly(), photosHandler.Rankings)
 	photos.Get("/:id/image", photosHandler.ProxyImage) // public — UUID is unguessable
+	photos.Post("/:id/tags", middleware.JWT(cfg.JWTSecret), tagsHandler.Add)
+	photos.Get("/:id/tags", middleware.JWT(cfg.JWTSecret), tagsHandler.ListForPhoto)
 
 	api.Post("/votes", middleware.JWT(cfg.JWTSecret), votesHandler.Submit)
 	api.Get("/leaderboard", middleware.JWT(cfg.JWTSecret), votesHandler.Leaderboard)
+
+	tags := api.Group("/tags", middleware.JWT(cfg.JWTSecret))
+	tags.Get("/autocomplete", tagsHandler.Autocomplete)
+	tags.Delete("/:tagId", tagsHandler.Delete)
 
 	// Google OAuth callback — unprotected, redirect from Google
 	api.Get("/admin/auth/google/callback", adminHandler.GoogleAuthCallback)
@@ -82,6 +89,7 @@ func main() {
 	admin.Post("/picker/session", adminHandler.StartPickerSession)
 	admin.Get("/picker/session/:id", adminHandler.CheckPickerSession)
 	admin.Post("/picker/session/:id/import", adminHandler.ImportPickerSession)
+	admin.Get("/photos/:id/tags", tagsHandler.AdminListForPhoto)
 
 	log.Printf("Server listening on :%s", cfg.Port)
 	log.Fatal(app.Listen(":" + cfg.Port))

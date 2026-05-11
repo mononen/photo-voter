@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import api from '../api/client'
+import { useAuth } from '../hooks/useAuth'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
@@ -12,11 +13,19 @@ interface RankedPhoto {
   vote_count: number
 }
 
+interface AdminTag {
+  id: string
+  name: string
+  submitted_by: string
+  created_at: string
+}
+
 function imageUrl(id: string, thumb = false) {
   return `${API_BASE}/api/photos/${id}/image${thumb ? '?size=thumb' : ''}`
 }
 
 export default function Rankings() {
+  const { isAdmin } = useAuth()
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   const [showZeroVotes, setShowZeroVotes] = useState(true)
 
@@ -52,6 +61,19 @@ export default function Rankings() {
   }, [lightboxIdx, closeLightbox, prev, next])
 
   const active = lightboxIdx !== null ? visiblePhotos[lightboxIdx] : null
+
+  const { data: adminTags = [] } = useQuery<AdminTag[]>({
+    queryKey: ['admin-tags', active?.id],
+    queryFn: () => api.get(`/admin/photos/${active!.id}/tags`).then((r) => r.data),
+    enabled: isAdmin && !!active,
+  })
+
+  // Group tags by name: { "John Doe": ["Alice", "Bob"], ... }
+  const groupedTags = adminTags.reduce<Record<string, string[]>>((acc, t) => {
+    if (!acc[t.name]) acc[t.name] = []
+    acc[t.name].push(t.submitted_by)
+    return acc
+  }, {})
 
   const zeroVoteCount = photos ? photos.filter((p) => p.vote_count === 0).length : 0
 
@@ -163,12 +185,26 @@ export default function Rankings() {
             />
           </div>
 
-          {/* Bottom bar — filename */}
+          {/* Bottom bar — filename + admin tags */}
           <div
-            className="px-6 py-4 text-center flex-shrink-0"
+            className="px-6 py-4 text-center flex-shrink-0 space-y-2"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-sm text-gray-400 font-mono">{active.filename || '(no filename)'}</p>
+            {isAdmin && Object.keys(groupedTags).length > 0 && (
+              <div className="flex flex-wrap justify-center gap-2">
+                {Object.entries(groupedTags).map(([name, taggers]) => (
+                  <span
+                    key={name}
+                    className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-sm text-gray-200"
+                    title={`Tagged by: ${taggers.join(', ')}`}
+                  >
+                    {name}
+                    <span className="text-gray-500 text-xs">({taggers.join(', ')})</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Prev / Next */}
