@@ -159,3 +159,75 @@ func (h *AdminHandler) ImportPickerSession(c fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{"imported": count})
 }
+
+type resetRequest struct {
+	Scope string `json:"scope"`
+}
+
+// POST /admin/reset — scope: "votes" | "votes_and_tags" | "event" | "full"
+func (h *AdminHandler) Reset(c fiber.Ctx) error {
+	var req resetRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request"})
+	}
+
+	ctx := c.Context()
+
+	switch req.Scope {
+	case "votes":
+		tag, err := h.db.Exec(ctx, "DELETE FROM votes")
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"deleted_votes": tag.RowsAffected()})
+
+	case "votes_and_tags":
+		tx, err := h.db.Begin(ctx)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		defer tx.Rollback(ctx)
+		vTag, err := tx.Exec(ctx, "DELETE FROM votes")
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		tTag, err := tx.Exec(ctx, "DELETE FROM photo_tags")
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"deleted_votes": vTag.RowsAffected(), "deleted_tags": tTag.RowsAffected()})
+
+	case "event":
+		// Deleting photos cascades votes and photo_tags
+		tag, err := h.db.Exec(ctx, "DELETE FROM photos")
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"deleted_photos": tag.RowsAffected()})
+
+	case "full":
+		tx, err := h.db.Begin(ctx)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		defer tx.Rollback(ctx)
+		pTag, err := tx.Exec(ctx, "DELETE FROM photos")
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		uTag, err := tx.Exec(ctx, "DELETE FROM users WHERE is_admin = false")
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"deleted_photos": pTag.RowsAffected(), "deleted_users": uTag.RowsAffected()})
+
+	default:
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "unknown scope"})
+	}
+}

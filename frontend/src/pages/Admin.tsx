@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import api from '../api/client'
 
 interface Settings {
@@ -34,21 +34,146 @@ interface PickerSession {
   expire_time: string
 }
 
+type ResetScope = 'votes' | 'votes_and_tags' | 'event' | 'full'
+
+interface ResetOption {
+  scope: ResetScope
+  label: string
+  description: string
+  deletes: string[]
+  keeps: string[]
+}
+
+const RESET_OPTIONS: ResetOption[] = [
+  {
+    scope: 'votes',
+    label: 'Reset votes',
+    description: 'Wipe all votes so everyone can vote again on the same photos.',
+    deletes: ['All votes'],
+    keeps: ['Photos', 'People tags', 'User accounts'],
+  },
+  {
+    scope: 'votes_and_tags',
+    label: 'Reset votes + people tags',
+    description: 'Wipe votes and all photo tagging. Photos stay, re-tagging starts fresh.',
+    deletes: ['All votes', 'All people tags'],
+    keeps: ['Photos', 'User accounts'],
+  },
+  {
+    scope: 'event',
+    label: 'New event (keep accounts)',
+    description: 'Remove all photos. Votes and tags cascade. User accounts remain.',
+    deletes: ['All photos', 'All votes', 'All people tags'],
+    keeps: ['User accounts'],
+  },
+  {
+    scope: 'full',
+    label: 'Full wipe',
+    description: 'Remove everything. Only your admin account survives.',
+    deletes: ['All photos', 'All votes', 'All people tags', 'All non-admin user accounts'],
+    keeps: ['Admin account only'],
+  },
+]
+
+function ResetModal({
+  option,
+  onClose,
+  onConfirm,
+  isPending,
+}: {
+  option: ResetOption
+  onClose: () => void
+  onConfirm: () => void
+  isPending: boolean
+}) {
+  const [typed, setTyped] = useState('')
+  const confirmed = typed === 'RESET'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div
+        className="w-full max-w-md bg-[#13141f] border border-white/10 rounded-2xl shadow-2xl p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-lg font-semibold text-white mb-1">{option.label}</h2>
+        <p className="text-sm text-gray-400 mb-5">{option.description}</p>
+
+        <div className="mb-5 space-y-3">
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1.5">Will be deleted</p>
+            <ul className="space-y-1">
+              {option.deletes.map((d) => (
+                <li key={d} className="flex items-center gap-2 text-sm text-red-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
+                  {d}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1.5">Will be kept</p>
+            <ul className="space-y-1">
+              {option.keeps.map((k) => (
+                <li key={k} className="flex items-center gap-2 text-sm text-gray-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
+                  {k}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <p className="text-sm text-gray-400 mb-2">
+          Type <span className="font-mono font-bold text-white">RESET</span> to confirm:
+        </p>
+        <input
+          autoFocus
+          type="text"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder="RESET"
+          className="w-full px-3 py-2 text-sm bg-white/5 border border-white/15 rounded-lg text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 mb-4"
+        />
+
+        <div className="flex gap-3">
+          <button
+            onClick={onConfirm}
+            disabled={!confirmed || isPending}
+            className="flex-1 px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            {isPending ? 'Resetting…' : 'Confirm reset'}
+          </button>
+          <button
+            onClick={onClose}
+            disabled={isPending}
+            className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Admin() {
   const [searchParams] = useSearchParams()
   const oauthResult = searchParams.get('connected') ? 'connected' : searchParams.get('error') ?? null
+  const queryClient = useQueryClient()
 
   const [session, setSession] = useState<PickerSession | null>(null)
   const [importResult, setImportResult] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [refreshResult, setRefreshResult] = useState<string | null>(null)
+  const [activeReset, setActiveReset] = useState<ResetScope | null>(null)
+  const [resetResult, setResetResult] = useState<string | null>(null)
 
   const { data: settings, isLoading, refetch: refetchSettings } = useQuery<Settings>({
     queryKey: ['adminSettings'],
     queryFn: () => api.get('/admin/settings').then((r) => r.data),
   })
 
-  const { data: stats } = useQuery<Stats>({
+  const { data: stats, refetch: refetchStats } = useQuery<Stats>({
     queryKey: ['adminStats'],
     queryFn: () => api.get('/admin/stats').then((r) => r.data),
   })
@@ -106,10 +231,29 @@ export default function Admin() {
     },
   })
 
+  const resetMutation = useMutation({
+    mutationFn: (scope: ResetScope) => api.post('/admin/reset', { scope }),
+    onSuccess: (_res, scope) => {
+      setActiveReset(null)
+      const label = RESET_OPTIONS.find((o) => o.scope === scope)?.label ?? scope
+      setResetResult(`${label} completed.`)
+      refetchSettings()
+      refetchStats()
+      queryClient.invalidateQueries({ queryKey: ['admin-tags-summary'] })
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      setResetResult(`Error: ${msg ?? 'reset failed'}`)
+      setActiveReset(null)
+    },
+  })
+
   const connectGoogle = async () => {
     const res = await api.get('/admin/auth/google/url')
     window.location.href = res.data.url
   }
+
+  const activeResetOption = RESET_OPTIONS.find((o) => o.scope === activeReset) ?? null
 
   return (
     <div
@@ -355,9 +499,60 @@ export default function Admin() {
               )}
             </section>
 
+            {/* Danger zone */}
+            <section className="border border-red-500/20 bg-red-500/5 rounded-xl p-6">
+              <h2 className="font-semibold text-red-400 mb-1">Danger Zone</h2>
+              <p className="text-sm text-gray-500 mb-5">
+                Reset the site between events. Each action requires typing RESET to confirm.
+              </p>
+
+              {resetResult && (
+                <div className={`mb-4 p-3 rounded-lg text-sm ${resetResult.startsWith('Error') ? 'bg-red-500/15 border border-red-500/30 text-red-400' : 'bg-green-500/15 border border-green-500/30 text-green-400'}`}>
+                  {resetResult}
+                </div>
+              )}
+
+              <div className="flex flex-col gap-3">
+                {RESET_OPTIONS.map((opt, i) => (
+                  <div
+                    key={opt.scope}
+                    className={`flex items-start justify-between gap-4 p-4 rounded-lg border ${
+                      i === RESET_OPTIONS.length - 1
+                        ? 'border-red-500/30 bg-red-500/5'
+                        : 'border-white/8 bg-white/3'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-200">{opt.label}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>
+                    </div>
+                    <button
+                      onClick={() => { setResetResult(null); setActiveReset(opt.scope) }}
+                      className={`flex-shrink-0 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                        i === RESET_OPTIONS.length - 1
+                          ? 'border-red-500/50 text-red-400 hover:bg-red-500/15'
+                          : 'border-white/15 text-gray-400 hover:bg-white/8 hover:text-white'
+                      }`}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+
           </div>
         )}
       </div>
+
+      {activeResetOption && (
+        <ResetModal
+          option={activeResetOption}
+          onClose={() => setActiveReset(null)}
+          onConfirm={() => resetMutation.mutate(activeResetOption.scope)}
+          isPending={resetMutation.isPending}
+        />
+      )}
     </div>
   )
 }
