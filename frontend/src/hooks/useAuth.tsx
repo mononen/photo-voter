@@ -6,7 +6,7 @@ interface AuthContextType {
   token: string | null
   isAdmin: boolean
   login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string) => Promise<void>
+  register: (name: string, email: string, password: string) => Promise<void>
   logout: () => void
 }
 
@@ -26,8 +26,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     navigate('/')
   }
 
-  const register = async (email: string, password: string) => {
-    const { data } = await api.post('/auth/register', { email, password })
+  const register = async (name: string, email: string, password: string) => {
+    const { data } = await api.post('/auth/register', { name, email, password })
     localStorage.setItem('token', data.token)
     localStorage.setItem('isAdmin', 'false')
     setToken(data.token)

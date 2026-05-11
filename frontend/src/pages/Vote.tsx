@@ -72,13 +72,15 @@ export default function Vote() {
     setHiResUrl(null)
     setHiResLoaded(false)
 
-    const w = Math.min(Math.round(window.innerWidth * window.devicePixelRatio), 4096)
-    const h = Math.min(Math.round(window.innerHeight * window.devicePixelRatio), 4096)
+    // Use at least 2× multiplier so non-retina desktops (DPR=1) still get a
+    // higher-resolution image that looks sharp when zoomed in.
+    const dpr = Math.max(window.devicePixelRatio, 2)
+    const w = Math.min(Math.round(window.innerWidth * dpr), 4096)
+    const h = Math.min(Math.round(window.innerHeight * dpr), 4096)
     const url = `${API_BASE}/api/photos/${renderedId}/image?w=${w}&h=${h}`
 
-    // The base image (1920×1080) is already displayed — only load hi-res if it's
-    // actually a different size (e.g. retina desktop or mobile sub-1080p viewport)
-    if (url !== renderedUrl) setHiResUrl(url)
+    // Only fetch hi-res if it would actually be larger than the base (1920×1080).
+    if (w > 1920 || h > 1080) setHiResUrl(url)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lightboxOpen, renderedId])
 
@@ -187,6 +189,9 @@ export default function Vote() {
     >
       <header className="flex justify-between items-center px-6 py-4">
         <div className="flex gap-4">
+          <Link to="/leaderboard" className="text-sm text-gray-400 hover:text-white transition-colors">
+            Leaderboard
+          </Link>
           {isAdmin && (
             <Link to="/rankings" className="text-sm text-gray-400 hover:text-white transition-colors">
               Rankings

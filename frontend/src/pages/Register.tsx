@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 
 export default function Register() {
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -14,7 +15,7 @@ export default function Register() {
     setError('')
     setLoading(true)
     try {
-      await register(email, password)
+      await register(name, email, password)
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { error?: string } } })?.response?.data?.error
@@ -47,6 +48,14 @@ export default function Register() {
         {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <input
+            type="text"
+            placeholder="Your name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white placeholder:text-gray-500 outline-none focus:ring-2 focus:ring-white/30 transition"
+            required
+          />
           <input
             type="email"
             placeholder="Email"

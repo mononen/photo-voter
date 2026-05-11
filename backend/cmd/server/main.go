@@ -67,12 +67,14 @@ func main() {
 	photos.Get("/:id/image", photosHandler.ProxyImage) // public — UUID is unguessable
 
 	api.Post("/votes", middleware.JWT(cfg.JWTSecret), votesHandler.Submit)
+	api.Get("/leaderboard", middleware.JWT(cfg.JWTSecret), votesHandler.Leaderboard)
 
 	// Google OAuth callback — unprotected, redirect from Google
 	api.Get("/admin/auth/google/callback", adminHandler.GoogleAuthCallback)
 
 	admin := api.Group("/admin", middleware.JWT(cfg.JWTSecret), middleware.AdminOnly())
 	admin.Get("/settings", adminHandler.GetSettings)
+	admin.Get("/stats", adminHandler.GetStats)
 	admin.Delete("/photos", adminHandler.ClearPhotos)
 	admin.Get("/auth/google/url", adminHandler.GoogleAuthURL)
 	admin.Post("/picker/session", adminHandler.StartPickerSession)

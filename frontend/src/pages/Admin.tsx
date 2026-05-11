@@ -9,6 +9,24 @@ interface Settings {
   photo_count: number
 }
 
+interface UserVoteStat {
+  name: string
+  email: string
+  vote_count: number
+}
+
+interface Stats {
+  total_users: number
+  total_votes: number
+  photos_voted_on: number
+  upvotes: number
+  downvotes: number
+  skips: number
+  completion_pct: number
+  avg_votes_per_photo: number
+  votes_per_user: UserVoteStat[]
+}
+
 interface PickerSession {
   session_id: string
   picker_url: string
@@ -27,6 +45,11 @@ export default function Admin() {
   const { data: settings, isLoading, refetch: refetchSettings } = useQuery<Settings>({
     queryKey: ['adminSettings'],
     queryFn: () => api.get('/admin/settings').then((r) => r.data),
+  })
+
+  const { data: stats } = useQuery<Stats>({
+    queryKey: ['adminStats'],
+    queryFn: () => api.get('/admin/stats').then((r) => r.data),
   })
 
   const clearPhotos = useMutation({
@@ -233,6 +256,73 @@ export default function Admin() {
                   </button>
                 )
               ) : null}
+            </section>
+
+            {/* Stats */}
+            <section className="border border-white/10 bg-white/5 rounded-xl p-6">
+              <h2 className="font-semibold text-white mb-4">Activity</h2>
+
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="bg-white/5 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-white">{stats?.total_users ?? '—'}</p>
+                  <p className="text-xs text-gray-500 mt-1">Users</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-white">{stats?.total_votes ?? '—'}</p>
+                  <p className="text-xs text-gray-500 mt-1">Total votes</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-white">{stats?.photos_voted_on ?? '—'}</p>
+                  <p className="text-xs text-gray-500 mt-1">Photos rated</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 mb-6">
+                <div className="bg-white/5 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-green-400">{stats?.upvotes ?? '—'}</p>
+                  <p className="text-xs text-gray-500 mt-1">Upvotes</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-red-400">{stats?.downvotes ?? '—'}</p>
+                  <p className="text-xs text-gray-500 mt-1">Downvotes</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-gray-400">{stats?.skips ?? '—'}</p>
+                  <p className="text-xs text-gray-500 mt-1">Skips</p>
+                </div>
+              </div>
+
+              <div className="flex gap-3 mb-6">
+                <div className="flex-1 bg-white/5 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-white">
+                    {stats != null ? `${stats.completion_pct.toFixed(1)}%` : '—'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Photos seen</p>
+                </div>
+                <div className="flex-1 bg-white/5 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-white">
+                    {stats != null ? stats.avg_votes_per_photo.toFixed(1) : '—'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">Avg votes / photo</p>
+                </div>
+              </div>
+
+              {stats && stats.votes_per_user.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-3">Votes per user</p>
+                  <div className="flex flex-col gap-2">
+                    {stats.votes_per_user.map((u) => (
+                      <div key={u.email} className="flex items-center justify-between text-sm">
+                        <div className="min-w-0">
+                          <span className="text-gray-200 font-medium">{u.name || u.email}</span>
+                          {u.name && <span className="text-gray-600 text-xs ml-2">{u.email}</span>}
+                        </div>
+                        <span className="text-gray-400 tabular-nums ml-4 flex-shrink-0">{u.vote_count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </section>
 
           </div>

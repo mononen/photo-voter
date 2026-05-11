@@ -41,3 +41,33 @@ func (h *VotesHandler) Submit(c fiber.Ctx) error {
 	}
 	return c.SendStatus(fiber.StatusNoContent)
 }
+
+type leaderboardEntry struct {
+	Name      string `json:"name"`
+	VoteCount int    `json:"vote_count"`
+}
+
+func (h *VotesHandler) Leaderboard(c fiber.Ctx) error {
+	rows, err := h.db.Query(c.Context(), `
+		SELECT u.name, COUNT(v.id) AS vote_count
+		FROM users u
+		LEFT JOIN votes v ON u.id = v.user_id
+		WHERE u.is_admin = false
+		GROUP BY u.id, u.name
+		ORDER BY vote_count DESC, u.name ASC
+	`)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal error"})
+	}
+	defer rows.Close()
+
+	entries := make([]leaderboardEntry, 0)
+	for rows.Next() {
+		var e leaderboardEntry
+		if err := rows.Scan(&e.Name, &e.VoteCount); err != nil {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	return c.JSON(entries)
+}

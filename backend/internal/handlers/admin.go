@@ -16,6 +16,68 @@ func NewAdminHandler(db *pgxpool.Pool, gp *services.GooglePhotosService, fronten
 	return &AdminHandler{db: db, gp: gp, frontendURL: frontendURL}
 }
 
+type userVoteStat struct {
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	VoteCount int    `json:"vote_count"`
+}
+
+func (h *AdminHandler) GetStats(c fiber.Ctx) error {
+	var totalUsers, totalVotes, photosVotedOn int
+	_ = h.db.QueryRow(c.Context(), "SELECT COUNT(*) FROM users WHERE is_admin = false").Scan(&totalUsers)
+	_ = h.db.QueryRow(c.Context(), "SELECT COUNT(*) FROM votes").Scan(&totalVotes)
+	_ = h.db.QueryRow(c.Context(), "SELECT COUNT(DISTINCT photo_id) FROM votes").Scan(&photosVotedOn)
+
+	rows, err := h.db.Query(c.Context(), `
+		SELECT u.name, u.email, COUNT(v.id) AS vote_count
+		FROM users u
+		LEFT JOIN votes v ON u.id = v.user_id
+		WHERE u.is_admin = false
+		GROUP BY u.id, u.name, u.email
+		ORDER BY vote_count DESC, u.name ASC
+	`)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	defer rows.Close()
+
+	perUser := make([]userVoteStat, 0)
+	for rows.Next() {
+		var s userVoteStat
+		if err := rows.Scan(&s.Name, &s.Email, &s.VoteCount); err != nil {
+			continue
+		}
+		perUser = append(perUser, s)
+	}
+
+	var upvotes, downvotes, skips, totalPhotos int
+	_ = h.db.QueryRow(c.Context(), "SELECT COUNT(*) FROM votes WHERE vote = 1").Scan(&upvotes)
+	_ = h.db.QueryRow(c.Context(), "SELECT COUNT(*) FROM votes WHERE vote = -1").Scan(&downvotes)
+	_ = h.db.QueryRow(c.Context(), "SELECT COUNT(*) FROM votes WHERE vote = 0").Scan(&skips)
+	_ = h.db.QueryRow(c.Context(), "SELECT COUNT(*) FROM photos").Scan(&totalPhotos)
+
+	var completionPct float64
+	if totalPhotos > 0 {
+		completionPct = float64(photosVotedOn) / float64(totalPhotos) * 100
+	}
+	var avgVotesPerPhoto float64
+	if photosVotedOn > 0 {
+		avgVotesPerPhoto = float64(totalVotes) / float64(photosVotedOn)
+	}
+
+	return c.JSON(fiber.Map{
+		"total_users":        totalUsers,
+		"total_votes":        totalVotes,
+		"photos_voted_on":    photosVotedOn,
+		"upvotes":            upvotes,
+		"downvotes":          downvotes,
+		"skips":              skips,
+		"completion_pct":     completionPct,
+		"avg_votes_per_photo": avgVotesPerPhoto,
+		"votes_per_user":     perUser,
+	})
+}
+
 func (h *AdminHandler) GetSettings(c fiber.Ctx) error {
 	connected := h.gp.IsOAuthConnected(c.Context())
 	email := ""

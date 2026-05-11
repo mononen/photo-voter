@@ -16,6 +16,7 @@ func NewAuthHandler(db *pgxpool.Pool, secret string) *AuthHandler {
 }
 
 type registerRequest struct {
+	Name     string `json:"name"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
@@ -25,8 +26,8 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
-	if req.Email == "" || req.Password == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "email and password required"})
+	if req.Name == "" || req.Email == "" || req.Password == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "name, email and password required"})
 	}
 	if len(req.Password) < 8 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "password must be at least 8 characters"})
@@ -39,8 +40,8 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 
 	var id string
 	if err := h.db.QueryRow(c.Context(),
-		"INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id",
-		req.Email, hash,
+		"INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
+		req.Name, req.Email, hash,
 	).Scan(&id); err != nil {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "email already registered"})
 	}
