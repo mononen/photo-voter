@@ -58,6 +58,9 @@ export default function Login() {
             Register
           </Link>
         </p>
+        <p className="text-xs text-gray-400 mt-6 text-center leading-relaxed">
+          Security disclaimer: I did not put a lot of effort into securing this app. Please don't use a password you actually care about.
+        </p>
       </div>
     </div>
   )

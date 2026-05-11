@@ -21,7 +21,7 @@ async function fetchNextPhoto(): Promise<Photo | null> {
 export default function Vote() {
   const queryClient = useQueryClient()
   const { logout, isAdmin } = useAuth()
-  const [voting, setVoting] = useState(false)
+  const [exitVote, setExitVote] = useState<number | null>(null)
 
   const { data: photo, isLoading } = useQuery<Photo | null>({
     queryKey: ['nextPhoto'],
@@ -32,15 +32,22 @@ export default function Vote() {
 
   const vote = useMutation({
     mutationFn: (v: number) => api.post('/votes', { photo_id: photo?.id, vote: v }),
-    onMutate: () => setVoting(true),
     onSettled: () => {
-      setVoting(false)
       queryClient.invalidateQueries({ queryKey: ['nextPhoto'] })
     },
   })
 
+  function handleVote(v: number) {
+    if (exitVote !== null) return
+    setExitVote(v)
+    setTimeout(() => {
+      vote.mutate(v)
+      setExitVote(null)
+    }, 300)
+  }
+
   return (
-    <div className="flex flex-col min-h-screen bg-black text-white">
+    <div className="flex flex-col min-h-screen text-white" style={{ background: 'radial-gradient(ellipse at 50% 42%, #1a1c2e 0%, #07070a 68%)' }}>
       <header className="flex justify-between items-center px-6 py-4">
         <div className="flex gap-4">
           {isAdmin && (
@@ -74,8 +81,8 @@ export default function Vote() {
           </div>
         ) : (
           <>
-            <PhotoCard url={`${API_BASE}/api/photos/${photo.id}/image`} />
-            <VoteButtons onVote={(v) => vote.mutate(v)} disabled={voting} />
+            <PhotoCard key={photo.id} url={`${API_BASE}/api/photos/${photo.id}/image`} exitVote={exitVote} />
+            <VoteButtons onVote={handleVote} disabled={exitVote !== null} />
           </>
         )}
       </main>
