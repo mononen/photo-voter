@@ -16,9 +16,8 @@ import (
 
 const (
 	pickerAPIBase = "https://photospicker.googleapis.com/v1"
-	// Picker base URLs expire after ~1 h; store 23 h as a generous upper bound.
-	// Re-run the picker if voting sessions outlast this.
-	pickerURLTTL = 23 * time.Hour
+	// Picker API base URLs expire server-side after ~1 hour.
+	pickerURLTTL = 50 * time.Minute
 )
 
 type GooglePhotosService struct {
@@ -116,6 +115,40 @@ func (s *GooglePhotosService) getClient(ctx context.Context) (*http.Client, erro
 		)
 	}
 	return oauth2.NewClient(ctx, oauth2.StaticTokenSource(fresh)), nil
+}
+
+// RefreshBaseURL fetches a fresh base URL for a photo by its Google Photos ID
+// and updates the stored record. Call this when url_expires_at has passed.
+func (s *GooglePhotosService) RefreshBaseURL(ctx context.Context, googlePhotosID string) (string, error) {
+	client, err := s.getClient(ctx)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Get(pickerAPIBase + "/mediaItems/" + googlePhotosID)
+	if err != nil {
+		return "", fmt.Errorf("refresh media item: %w", err)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("picker API %d refreshing %s: %s", resp.StatusCode, googlePhotosID, string(data))
+	}
+	var item pickerMediaItem
+	if err := json.Unmarshal(data, &item); err != nil {
+		return "", fmt.Errorf("parse media item: %w", err)
+	}
+	if item.MediaFile.BaseURL == "" {
+		return "", fmt.Errorf("empty base URL returned for %s", googlePhotosID)
+	}
+	expiresAt := time.Now().Add(pickerURLTTL)
+	_, err = s.db.Exec(ctx,
+		"UPDATE photos SET base_url = $1, url_expires_at = $2 WHERE google_photos_id = $3",
+		item.MediaFile.BaseURL, expiresAt, googlePhotosID,
+	)
+	if err != nil {
+		return "", fmt.Errorf("update photo url: %w", err)
+	}
+	return item.MediaFile.BaseURL, nil
 }
 
 // --- Picker API ---

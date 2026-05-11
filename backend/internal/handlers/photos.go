@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5"
@@ -55,10 +56,20 @@ func (h *PhotosHandler) ProxyImage(c fiber.Ctx) error {
 	size := c.Query("size", "full")
 
 	var baseURL string
+	var urlExpiresAt time.Time
+	var googlePhotosID string
 	if err := h.db.QueryRow(c.Context(),
-		"SELECT base_url FROM photos WHERE id = $1", photoID,
-	).Scan(&baseURL); err != nil {
+		"SELECT base_url, url_expires_at, google_photos_id FROM photos WHERE id = $1", photoID,
+	).Scan(&baseURL, &urlExpiresAt, &googlePhotosID); err != nil {
 		return c.SendStatus(fiber.StatusNotFound)
+	}
+
+	if time.Now().After(urlExpiresAt) {
+		fresh, err := h.gp.RefreshBaseURL(c.Context(), googlePhotosID)
+		if err != nil {
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "photo URL expired and could not be refreshed: " + err.Error()})
+		}
+		baseURL = fresh
 	}
 
 	var sizeParam string
