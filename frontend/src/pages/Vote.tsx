@@ -157,12 +157,11 @@ export default function Vote() {
       setExitPhotoId(null)
       setBatchVotes(newVotes)
 
-      // Find next unvoted photo in batch (scan forward, wrap around)
+      // Find next unvoted photo in chronological order (earliest unvoted, no wrap)
       const n = batch.length
       let next: number | null = null
-      for (let i = 1; i < n; i++) {
-        const idx = (batchIndex + i) % n
-        if (!(batch[idx].id in newVotes)) { next = idx; break }
+      for (let i = 0; i < n; i++) {
+        if (!(batch[i].id in newVotes)) { next = i; break }
       }
 
       if (next !== null) setBatchIndex(next)
